@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Short Story Pipeline</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Short Story Pipeline</h1>
+            <p class="subtitle">Generate distinctive short stories with memorable characters and non-generic language</p>
+        </header>
+
+        <main>
+            <!-- Input Section -->
+            <section class="input-section">
+                <h2>Create Your Story</h2>
+                <form id="story-form">
+                    <div class="form-group">
+                        <label for="genre">Genre *</label>
+                        <select id="genre" name="genre" required>
+                            <option value="">Select a genre...</option>
+                            {% for genre in genres %}
+                            <option value="{{ genre }}">{{ genre }}</option>
+                            {% endfor %}
+                        </select>
+                        <small>Genre selection drives the story framework, outline structure, and stylistic constraints</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="idea">Story Idea *</label>
+                        <textarea 
+                            id="idea" 
+                            name="idea" 
+                            placeholder="A lighthouse keeper who collects lost voices in glass jars..."
+                            rows="3"
+                            required
+                        ></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="character">Character</label>
+                        <textarea 
+                            id="character" 
+                            name="character" 
+                            placeholder='{"name": "Mara", "quirks": ["Never speaks above a whisper"], "contradictions": "Fiercely protective but terrified of connection"}'
+                            rows="4"
+                        ></textarea>
+                        <small>JSON format or plain text description</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="theme">Theme</label>
+                        <input 
+                            type="text" 
+                            id="theme" 
+                            name="theme" 
+                            placeholder="What happens to the stories we never tell?"
+                        >
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Generate Story</button>
+                </form>
+            </section>
+
+            <!-- Output Section -->
+            <section class="output-section" id="output-section" style="display: none;">
+                <div class="output-header">
+                    <h2>Your Story</h2>
+                    <div class="word-count" id="word-count">
+                        <span id="word-count-text">0 / 7500 words</span>
+                        <span id="word-count-status" class="status-ok"></span>
+                    </div>
+                </div>
+
+                <div class="editor-container">
+                    <textarea 
+                        id="story-editor" 
+                        placeholder="Your generated story will appear here..."
+                        rows="20"
+                    ></textarea>
+                </div>
+
+                <div class="editor-actions">
+                    <button id="save-btn" class="btn btn-secondary">Save</button>
+                    <button id="regenerate-btn" class="btn btn-secondary">Regenerate</button>
+                    <button id="validate-btn" class="btn btn-secondary">Validate</button>
+                </div>
+
+                <div id="validation-results" class="validation-results" style="display: none;"></div>
+            </section>
+
+            <!-- Loading Indicator -->
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Generating your story...</p>
+            </div>
+
+            <!-- Error Messages -->
+            <div id="error" class="error" style="display: none;"></div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
+
