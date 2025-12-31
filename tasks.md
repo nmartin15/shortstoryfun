@@ -3,19 +3,19 @@
 > **See [CONCEPTS.md](CONCEPTS.md) for definitions of core tools referenced below.**
 
 ## Immediate Tasks
-- [ ] Implement `ShortStoryPipeline` class
-- [ ] Add scaffolding utility for POV and prose style with [voice development](CONCEPTS.md#voice-development)
-- [ ] Build [cliché detection system](CONCEPTS.md#cliché-detection-system) with replacement suggestions
-- [ ] Create [character voice analyzer](CONCEPTS.md#character-voice-analyzer) for distinctiveness scoring
-- [ ] Write unit tests for word-count enforcement
+- [x] Implement `ShortStoryPipeline` class
+- [x] Add scaffolding utility for POV and prose style with [voice development](CONCEPTS.md#voice-development)
+- [x] Build [cliché detection system](CONCEPTS.md#cliché-detection-system) with replacement suggestions
+- [x] Create [character voice analyzer](CONCEPTS.md#character-voice-analyzer) for distinctiveness scoring
+- [x] Write unit tests for word-count enforcement
 - [ ] Create example script in `examples/sample_story.py` demonstrating distinctive voice
 
 ## Near-Term Tasks
-- [ ] Document usage in README
-- [ ] Add automated word-count validator
-- [ ] Create helper functions for premise capture and outline generation
-- [ ] Build [memorability scorer](CONCEPTS.md#memorability-scorer)
-- [ ] Develop [anti-generic filters](CONCEPTS.md#anti-generic-filters) for language, characters, and plot beats
+- [x] Document usage in README
+- [x] Add automated word-count validator
+- [x] Create helper functions for premise capture and outline generation
+- [x] Build [memorability scorer](CONCEPTS.md#memorability-scorer)
+- [x] Develop [anti-generic filters](CONCEPTS.md#anti-generic-filters) for language, characters, and plot beats
 - [ ] Create voice consistency checker across draft stages
 
 ## Long-Term Tasks

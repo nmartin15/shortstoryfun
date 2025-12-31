@@ -46,10 +46,10 @@ The Short Story Pipeline is a modular system that transforms a creative premise 
   - **Voice opportunities**: Places where character voice can shine
 
 **Key Functions**:
-- `generate_outline()`: Creates three-act structure from premise
-- `enrich_outline()`: Adds scene-level detail and transitions
-- `flag_predictable_beats()`: Uses [cliché detection](CONCEPTS.md#cliché-detection-system) for story beats
-- `identify_voice_moments()`: Marks scenes where [voice development](CONCEPTS.md#voice-development) can emerge
+- `generate_outline()`: Creates three-act structure from premise with detailed beats ✅ **Implemented**
+- `generate_outline_structure()`: LLM-based outline generation with template fallback ✅ **Implemented**
+- Beat validation: Uses [cliché detection](CONCEPTS.md#cliché-detection-system) to flag predictable beats ✅ **Implemented**
+- Voice opportunities: Automatically identifies scenes where [voice development](CONCEPTS.md#voice-development) can emerge ✅ **Implemented**
 
 ---
 
@@ -70,12 +70,14 @@ The Short Story Pipeline is a modular system that transforms a creative premise 
   - **Sensory specificity**: Which senses to emphasize for vividness
 
 **Key Functions**:
-- `scaffold_pov()`: Determines and configures narrative perspective with voice markers
-- `scaffold_tone()`: Establishes emotional register with nuance
-- `scaffold_style()`: Sets prose characteristics (sentence length, rhythm, texture)
-- `map_conflicts()`: Identifies and structures conflicts (conflict-first approach)
-- `develop_character_voices()`: Uses [character voice analyzer](CONCEPTS.md#character-voice-analyzer) to create distinct patterns
-- `establish_language_register()`: Defines the linguistic texture (formal/colloquial/slang mix)
+- `scaffold()`: Generates complete scaffold structure with voice development ✅ **Implemented**
+- `generate_scaffold_structure()`: LLM-based scaffolding with template fallback ✅ **Implemented**
+- Narrative voice development: POV selection with rationale, prose style, sentence rhythm ✅ **Implemented**
+- Character voice profiles: Speech patterns, vocabulary, rhythm from character quirks ✅ **Implemented**
+- Conflict mapping: Identifies and structures internal/external conflicts (conflict-first approach) ✅ **Implemented**
+- Tone and emotional register: Nuanced emotional register with mood and atmosphere ✅ **Implemented**
+- Sensory specificity: Defines which senses to emphasize for vividness ✅ **Implemented**
+- Style guidelines: Sentence length, dialogue ratio, description density, pacing ✅ **Implemented**
 
 ---
 
@@ -119,13 +121,12 @@ The Short Story Pipeline is a modular system that transforms a creative premise 
   - **Memorability score**: Metrics on distinctiveness and impact
 
 **Key Functions**:
-- `revise_language()`: Sharpens word choice, uses [cliché detection](CONCEPTS.md#cliché-detection-system), strengthens specificity
-- `refine_pacing()`: Adjusts rhythm and scene transitions for maximum impact
-- `strengthen_arc()`: Enhances narrative progression and character development
-- `deepen_character_voices()`: Uses [character voice analyzer](CONCEPTS.md#character-voice-analyzer) for consistency
-- `eliminate_generic_elements()`: Uses [anti-generic filters](CONCEPTS.md#anti-generic-filters)
-- `calculate_memorability_score()`: Uses [memorability scorer](CONCEPTS.md#memorability-scorer)
-- `final_word_count_check()`: Validates final word count compliance
+- `revise()`: Comprehensive revision with LLM or rule-based fallback ✅ **Implemented**
+- `revise_story_text()`: LLM-based revision with distinctiveness improvements ✅ **Implemented**
+- Cliché detection and replacement: Uses [cliché detection system](CONCEPTS.md#cliché-detection-system) ✅ **Implemented**
+- Character voice analysis: Uses [character voice analyzer](CONCEPTS.md#character-voice-analyzer) for consistency ✅ **Implemented**
+- Memorability scoring: Uses [memorability scorer](CONCEPTS.md#memorability-scorer) for multi-dimensional analysis ✅ **Implemented**
+- Word count validation: Validates final word count compliance ✅ **Implemented**
 
 ---
 

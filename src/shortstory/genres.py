@@ -97,6 +97,10 @@ def get_genre_config(genre_name):
     Returns:
         Dict with framework, outline, and constraints, or None if not found
     """
+    # Handle None or empty string
+    if not genre_name:
+        return GENRE_CONFIGS.get("General Fiction")
+    
     # Case-insensitive lookup
     for key, value in GENRE_CONFIGS.items():
         if key.lower() == genre_name.lower():
@@ -117,19 +121,43 @@ def get_available_genres():
 
 
 def get_framework(genre_name):
-    """Get framework type for a genre."""
+    """
+    Get framework type for a genre.
+    
+    Args:
+        genre_name: Name of the genre (case-insensitive)
+    
+    Returns:
+        Framework type as a string, or None if genre not found
+    """
     config = get_genre_config(genre_name)
     return config.get("framework") if config else None
 
 
 def get_outline_structure(genre_name):
-    """Get outline structure for a genre."""
+    """
+    Get outline structure for a genre.
+    
+    Args:
+        genre_name: Name of the genre (case-insensitive)
+    
+    Returns:
+        Outline structure as a list, or None if genre not found
+    """
     config = get_genre_config(genre_name)
     return config.get("outline") if config else None
 
 
 def get_constraints(genre_name):
-    """Get constraints for a genre."""
+    """
+    Get constraints for a genre.
+    
+    Args:
+        genre_name: Name of the genre (case-insensitive)
+    
+    Returns:
+        Constraints as a dictionary, or None if genre not found
+    """
     config = get_genre_config(genre_name)
     return config.get("constraints") if config else None
 

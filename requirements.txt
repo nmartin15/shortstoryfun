@@ -3,6 +3,31 @@
 # Web framework
 flask>=3.0.0
 flask-cors>=4.0.0
+flask-limiter>=3.5.0
+
+# LLM for story generation
+google-generativeai>=0.3.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# PDF generation
+reportlab>=4.0.0
+
+# DOCX export
+python-docx>=1.0.0
+
+# EPUB export
+ebooklib>=0.18
+
+# Production WSGI server
+gunicorn>=21.2.0
+
+# Redis for rate limiting (optional, but recommended for production)
+redis>=5.0.0
+
+# Token counting for accurate LLM token estimation
+tiktoken>=0.5.0
 
 # Core utilities (to be added)
 # - nltk>=3.8

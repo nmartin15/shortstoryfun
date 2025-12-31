@@ -9,7 +9,19 @@ MAX_WORD_COUNT = 7500
 
 class WordCountError(Exception):
     """Raised when word count exceeds maximum."""
-    pass
+    
+    def __init__(self, word_count, max_words):
+        """
+        Initialize error with word count details.
+        
+        Args:
+            word_count: Actual word count
+            max_words: Maximum allowed word count
+        """
+        self.word_count = word_count
+        self.max_words = max_words
+        message = f"Word count {word_count} exceeds maximum of {max_words}"
+        super().__init__(message)
 
 
 class WordCountValidator:
@@ -32,16 +44,27 @@ class WordCountValidator:
         """
         Count words in text.
         
+        Uses whitespace splitting - treats punctuation as part of words.
+        Empty strings and None return 0.
+        
         Args:
-            text: String to count words in
+            text: String to count words in (None and empty strings return 0)
         
         Returns:
-            Word count as integer
+            Word count as integer (0 for None or empty strings)
+        
+        Raises:
+            TypeError: If text is not a string, None, or empty string
         """
-        if not text or not isinstance(text, str):
+        if text is None:
             return 0
-        # Simple word count - split on whitespace
-        words = text.split()
+        if not isinstance(text, str):
+            raise TypeError(f"count_words() expects a string, got {type(text).__name__}")
+        if not text:
+            return 0
+        
+        # Split on whitespace and filter out empty strings
+        words = [w for w in text.split() if w.strip()]
         return len(words)
     
     def validate(self, text, raise_error=True):
@@ -59,9 +82,7 @@ class WordCountValidator:
         is_valid = word_count <= self.max_words
         
         if not is_valid and raise_error:
-            raise WordCountError(
-                f"Word count {word_count} exceeds maximum of {self.max_words}"
-            )
+            raise WordCountError(word_count, self.max_words)
         
         return word_count, is_valid
     
