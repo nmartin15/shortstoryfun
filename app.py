@@ -273,7 +273,23 @@ def generate_story():
         # Get the revised story text
         revised_story_text = revised_draft.get('text', '')
         
+        # IMPORTANT: Word count should ONLY count the actual story text, not metadata
+        # Recalculate word count from the story text only to ensure accuracy
+        story_word_count = pipeline.word_validator.count_words(revised_story_text)
+        
+        # Log if there's a discrepancy (for debugging)
+        draft_word_count = revised_draft.get('word_count', 0)
+        if abs(story_word_count - draft_word_count) > 50:
+            logger.warning(
+                f"Word count discrepancy: draft reported {draft_word_count}, "
+                f"actual story text is {story_word_count} words"
+            )
+        
+        # Use the actual story text word count (not metadata)
+        word_count = story_word_count
+        
         # Build the full story output with metadata
+        # NOTE: The story text itself should be clean - metadata is in the JSON response, not the story
         story_text = f"""# {idea}
 
 ## Genre: {genre} | Framework: {framework} | Structure: {', '.join(outline_structure)}
@@ -293,12 +309,7 @@ Idea: {idea_dist['distinctiveness_score']:.2f}/1.0 | Character: {char_dist['dist
 ## Story
 
 {revised_story_text}
-
-**Constraints:** {', '.join([f"{k}:{v}" for k, v in constraints.items()]) if constraints else 'None specified'}
 """
-        
-        # Use word count from revised draft
-        word_count = revised_draft.get('word_count', 0)
         story_id = f"story_{uuid.uuid4().hex[:8]}"
         # Initialize revision history
         revision_history = [{

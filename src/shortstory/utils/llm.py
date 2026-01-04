@@ -102,6 +102,71 @@ def _estimate_tokens(text: str, model_name: str = DEFAULT_MODEL) -> int:
     return int(estimated_tokens * 1.1) + 10
 
 
+def _strip_metadata_from_story(story_text: str) -> str:
+    """
+    Remove any metadata that might have been appended to the story text.
+    
+    Strips out lines containing:
+    - **Constraints:**
+    - Constraints:
+    - tone:, pace:, pov_preference, sensory_focus
+    - Any other metadata patterns
+    
+    Args:
+        story_text: The story text that may contain metadata
+        
+    Returns:
+        Clean story text with metadata removed
+    """
+    if not story_text:
+        return story_text
+    
+    lines = story_text.split('\n')
+    cleaned_lines = []
+    metadata_started = False
+    
+    for line in lines:
+        # Check if this line starts metadata section
+        if re.search(r'^\s*\*\*?Constraints?\*\*?:?\s*$', line, re.IGNORECASE):
+            metadata_started = True
+            continue
+        
+        # If we've hit metadata, check if this line contains metadata patterns
+        if metadata_started or re.search(r'(tone:|pace:|pov_preference|sensory_focus)', line, re.IGNORECASE):
+            # Skip this line if it looks like metadata
+            if re.search(r'(tone:|pace:|pov_preference|sensory_focus|constraints?)', line, re.IGNORECASE):
+                continue
+        
+        # If we hit a blank line after what might be metadata, reset
+        if metadata_started and line.strip() == '':
+            # Check if next non-empty line is also metadata
+            continue
+        
+        # If we have content that doesn't look like metadata, we're back in story
+        if metadata_started and line.strip() and not re.search(r'(tone:|pace:|pov_preference|sensory_focus|constraints?)', line, re.IGNORECASE):
+            metadata_started = False
+        
+        cleaned_lines.append(line)
+    
+    # Join back and clean up any trailing metadata
+    cleaned_text = '\n'.join(cleaned_lines)
+    
+    # Final pass: remove any trailing metadata patterns
+    # Remove everything after the last occurrence of metadata markers
+    metadata_pattern = r'\n\s*\*\*?Constraints?\*\*?:?.*$'
+    cleaned_text = re.sub(metadata_pattern, '', cleaned_text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+    
+    # Remove lines that are just metadata
+    lines = cleaned_text.split('\n')
+    final_lines = []
+    for line in lines:
+        if re.search(r'^\s*(tone:|pace:|pov_preference|sensory_focus):', line, re.IGNORECASE):
+            continue
+        final_lines.append(line)
+    
+    return '\n'.join(final_lines).strip()
+
+
 def _calculate_max_output_tokens(
     prompt: str,
     system_prompt: Optional[str] = None,
@@ -154,8 +219,8 @@ def _calculate_max_output_tokens(
     
     # FOR FULL-LENGTH SHORT STORIES: Request maximum tokens possible
     # Gemini models support up to 8192 max_output_tokens
-    # For full-length short stories (2000-7500 words), we need maximum tokens
-    if target_word_count and target_word_count >= 2000:
+    # For full-length short stories (3000-7500 words, industry standard), we need maximum tokens
+    if target_word_count and target_word_count >= 3000:
         # For full-length stories, request MAXIMUM tokens (8192)
         # This ensures the model has enough space to complete the story
         min_required_tokens = 8192  # MAXIMUM for Gemini
@@ -173,8 +238,8 @@ def _calculate_max_output_tokens(
     final_tokens = min(final_tokens, 8192, available_tokens)
     
     # For full-length stories, ensure we're requesting at least 6000 tokens
-    # This gives enough room for 3000-4000 word stories
-    if target_word_count and target_word_count >= 2000:
+    # This gives enough room for 3000-5000 word stories (industry standard)
+    if target_word_count and target_word_count >= 3000:
         final_tokens = max(6000, final_tokens)
         final_tokens = min(final_tokens, 8192, available_tokens)
     
@@ -550,20 +615,30 @@ FRAMEWORK FOR OUTSTANDING SHORT STORIES:
    - Let the reader feel the stakes before they fully understand them
    - AVOID: Long exposition, backstory dumps, or worldbuilding that doesn't immediately matter
 
-3. USE CHARACTERS AS PRESSURE POINTS:
+3. USE CHARACTERS AS PRESSURE POINTS (CRISP, SHARP CHARACTERIZATION):
    - You don't need many characters - you need ONE unforgettable one
    - Give them a desire, a flaw, and a pressure that forces a choice
    - Short stories shine when characters are distilled to their most essential contradictions
+   - CRISP CHARACTERIZATION: Make characters SHARP and IMMEDIATELY recognizable
+   - Show character through SPECIFIC actions, gestures, and speech patterns - not generic descriptions
+   - Every character detail must be CRISP and MEMORABLE - a specific way they move, speak, or react
+   - Avoid vague character traits - use concrete, vivid details that make the character instantly distinct
+   - Character should be so crisp the reader can "see" them in the first few paragraphs
 
 4. BUILD TENSION THROUGH COMPRESSION:
    - Every sentence must: advance the plot, reveal character, deepen theme, OR create atmosphere
    - If a sentence does none of these, cut it
    - Compression = intensity
 
-5. ANCHOR THE STORY IN A VIVID, SPECIFIC DETAIL:
-   - Readers remember IMAGES, not summaries
+5. ANCHOR THE STORY IN VIVID, SPECIFIC SENSORY DETAILS (FEEL THE SENSES):
+   - Readers remember IMAGES and SENSATIONS, not summaries
+   - FEEL THE SENSES: Engage sight, sound, smell, taste, touch throughout the story
    - A smell that defines a room, a gesture that reveals a relationship, a single object that symbolizes the emotional core
-   - One or two strong sensory details can carry an entire short story
+   - Use sensory details in EVERY scene - what does the character see, hear, smell, taste, feel?
+   - Make the reader FEEL the world through the character's senses
+   - Specific sensory details: the texture of fabric, the taste of metal, the sound of footsteps on gravel
+   - Don't just describe - make the reader EXPERIENCE through sensory immersion
+   - One or two strong sensory details per scene can transform a story from flat to vivid
 
 6. LET THE THEME EMERGE, DON'T ANNOUNCE IT:
    - Show the emotional truth through action
@@ -618,7 +693,16 @@ CORE PRINCIPLES:
    - Include multiple scenes with dialogue, action, and description
    - Develop the full narrative arc: beginning, middle, and end
    - Do NOT stop after a few paragraphs - continue until the story is complete
-   - Aim for substantial length (thousands of words, not dozens)"""
+   - Aim for substantial length (thousands of words, not dozens)
+
+6. NEVER USE META-TERMS IN THE STORY (Critical):
+   - NEVER use terms like "protagonist", "antagonist", "main character", "hero", "villain" in the actual story text
+   - These are analytical terms for discussion, NOT narrative terms for storytelling
+   - The story should simply tell the story - use character names, pronouns, or descriptive terms
+   - If you need to refer to a character, use their name, "she", "he", "they", or descriptive phrases like "the woman", "the figure", etc.
+   - The story must read as pure narrative, never breaking the fourth wall or using meta-commentary
+   - Example: Instead of "the protagonist struggled", write "Lira struggled" or "she struggled"
+   - Example: Instead of "the antagonist appeared", write "the entity appeared" or use the character's actual name"""
 
     # Build main prompt
     prompt_parts = [
@@ -664,6 +748,9 @@ CORE PRINCIPLES:
     prompt_parts.append(f"**CRITICAL REQUIREMENTS:**\n")
     prompt_parts.append(f"- Maximum word count: {max_words} words (STRICT LIMIT)\n")
     prompt_parts.append("- DISTINCTIVENESS: Zero tolerance for clichés, generic phrases, or stock character archetypes\n")
+    prompt_parts.append("- CRISP CHARACTERS: Characters must be SHARP and IMMEDIATELY recognizable through specific actions, gestures, and speech\n")
+    prompt_parts.append("- CRISP INCITING INCIDENT: The moment that changes everything must be CLEAR, SPECIFIC, and happen EARLY (within first 500 words)\n")
+    prompt_parts.append("- SENSORY IMMERSION: Engage ALL FIVE SENSES throughout - make the reader FEEL the world, not just read about it\n")
     prompt_parts.append("- CHARACTER VOICE: Every character must have a unique, consistent voice that reflects their quirks and contradictions\n")
     prompt_parts.append("- TONE CONSISTENCY: Maintain the '{tone}' tone from first sentence to last—no unintentional shifts\n")
     prompt_parts.append("- LANGUAGE: Use specific, vivid descriptions. Replace vague words with precise details\n")
@@ -671,62 +758,149 @@ CORE PRINCIPLES:
     prompt_parts.append("- NARRATIVE VOICE: If first person, the narrator's voice must match their character throughout\n\n")
     
     prompt_parts.append("**WRITING INSTRUCTIONS (Following Outstanding Short Story Framework):**\n\n")
-    prompt_parts.append("**OPENING (In Medias Res):**\n")
+    prompt_parts.append("**OPENING (In Medias Res - WITH CRISP INCITING INCIDENT):**\n")
     prompt_parts.append("1. Drop the reader into motion - start in the middle of something happening\n")
-    prompt_parts.append("2. Create immediate tension in the first paragraph\n")
-    prompt_parts.append("3. Establish tone and stakes before full context is revealed\n")
-    prompt_parts.append("4. AVOID exposition dumps or backstory - let details emerge naturally\n\n")
-    prompt_parts.append("**CHARACTER AS PRESSURE POINT:**\n")
+    prompt_parts.append("2. CRISP INCITING INCIDENT: The moment that changes everything must be SHARP and IMMEDIATE\n")
+    prompt_parts.append("   - The inciting incident should happen EARLY (within first 500 words)\n")
+    prompt_parts.append("   - Make it CRISP and CLEAR - a specific event, discovery, or moment that disrupts the status quo\n")
+    prompt_parts.append("   - The reader should FEEL the shift - something concrete happens that changes the character's world\n")
+    prompt_parts.append("   - Avoid vague "something was wrong" - show the SPECIFIC moment of change\n")
+    prompt_parts.append("3. Create immediate tension in the first paragraph\n")
+    prompt_parts.append("4. Establish tone and stakes before full context is revealed\n")
+    prompt_parts.append("5. AVOID exposition dumps or backstory - let details emerge naturally\n")
+    prompt_parts.append("6. Use sensory details from the start - make the reader FEEL the world immediately\n\n")
+    prompt_parts.append("**CHARACTER AS PRESSURE POINT (CRISP CHARACTERIZATION):**\n")
     prompt_parts.append("5. Focus on ONE unforgettable character with a clear desire, flaw, and pressure point\n")
-    prompt_parts.append("6. Introduce character through their unique voice and specific actions, not generic descriptions\n")
-    prompt_parts.append("7. Show their essential contradictions through what they do and say\n")
-    prompt_parts.append("8. Dialogue must sound like THIS specific character, not a generic person\n\n")
+    prompt_parts.append("6. CRISP CHARACTER INTRODUCTION: Introduce character through SPECIFIC, MEMORABLE details\n")
+    prompt_parts.append("   - A specific gesture, way of speaking, or physical detail that makes them instantly recognizable\n")
+    prompt_parts.append("   - Show character through concrete actions, not abstract traits\n")
+    prompt_parts.append("   - Make the character SHARP and DISTINCT from the first appearance\n")
+    prompt_parts.append("7. Show their essential contradictions through what they do and say - make contradictions CRISP and visible\n")
+    prompt_parts.append("8. Dialogue must sound like THIS specific character - each character's voice should be so crisp it's unmistakable\n")
+    prompt_parts.append("9. Use sensory details to reveal character - how they move, what they notice, how they interact with the world\n\n")
     prompt_parts.append("**COMPRESSION & TENSION:**\n")
     prompt_parts.append("9. Every sentence must: advance plot, reveal character, deepen theme, OR create atmosphere\n")
     prompt_parts.append("10. If a sentence does none of these, it doesn't belong\n")
     prompt_parts.append("11. Build tension through compression - intensity comes from what's left unsaid\n\n")
-    prompt_parts.append("**VIVID, SPECIFIC DETAILS:**\n")
-    prompt_parts.append("12. Anchor the story in concrete sensory details: a smell, a gesture, a specific object\n")
-    prompt_parts.append("13. Use one or two strong images that carry emotional weight throughout\n")
-    prompt_parts.append("14. Show, don't tell - let readers remember images, not summaries\n\n")
+    prompt_parts.append("**VIVID, SPECIFIC SENSORY DETAILS (FEEL THE SENSES):**\n")
+    prompt_parts.append("12. FEEL THE SENSES: Engage all five senses throughout the story\n")
+    prompt_parts.append("   - Sight: Specific visual details, colors, lighting, textures\n")
+    prompt_parts.append("   - Sound: Ambient noise, voices, music, silence\n")
+    prompt_parts.append("   - Smell: Scents that define places and moments\n")
+    prompt_parts.append("   - Taste: Flavors that evoke emotion or memory\n")
+    prompt_parts.append("   - Touch: Textures, temperatures, physical sensations\n")
+    prompt_parts.append("13. Use sensory details in EVERY scene - make the reader EXPERIENCE the world, not just read about it\n")
+    prompt_parts.append("14. Anchor the story in concrete sensory details: a smell, a gesture, a specific object\n")
+    prompt_parts.append("15. Use one or two strong sensory images per scene that carry emotional weight\n")
+    prompt_parts.append("16. Show, don't tell - let readers FEEL and EXPERIENCE through sensory immersion\n\n")
     prompt_parts.append("**THEME & LANGUAGE:**\n")
     prompt_parts.append("15. Let the theme emerge through action and subtext - DON'T announce or moralize\n")
     prompt_parts.append("16. Polish language: cut filler words, strengthen verbs, use rhythm intentionally\n")
     prompt_parts.append("17. Make dialogue carry weight - let silence and implication do work\n")
     prompt_parts.append("18. Every word must earn its place - this is closer to poetry than prose\n\n")
-    prompt_parts.append("**ENDING (Turn, Not a Bow):**\n")
-    prompt_parts.append("19. End on a turn: a realization, reversal, choice, haunting image, or reframing question\n")
-    prompt_parts.append("20. The ending should feel inevitable but surprising\n")
-    prompt_parts.append("21. Don't tie everything up - short stories rarely end with everything resolved\n")
-    prompt_parts.append("22. The final beat should shift the reader's understanding\n\n")
+    prompt_parts.append("**DRAMATIC TENSION & CHARACTER RESISTANCE (CRITICAL):**\n")
+    prompt_parts.append("19. CHARACTERS MUST FACE REAL RESISTANCE:\n")
+    prompt_parts.append("   - The protagonist must encounter genuine obstacles that challenge their core beliefs\n")
+    prompt_parts.append("   - Show moments where the character FAILS, not just succeeds\n")
+    prompt_parts.append("   - Include a moment where the character BREAKS - loses control, gives in to their flaw, or faces their greatest fear\n")
+    prompt_parts.append("   - The character's arc requires them to truly lose control at least once\n")
+    prompt_parts.append("   - Resistance should feel costly - every victory should have a price\n\n")
+    prompt_parts.append("20. IDEOLOGICAL CLASHES WITH ANTAGONISTS:\n")
+    prompt_parts.append("   - Antagonists (whether person, force, or system) must have compelling worldviews that challenge the protagonist\n")
+    prompt_parts.append("   - The protagonist's argument should FAIL at least once - their logic or philosophy should be shown as insufficient\n")
+    prompt_parts.append("   - Show the antagonist's perspective through demonstration, not just explanation\n")
+    prompt_parts.append("   - The resolution should require a SACRIFICE or TRADE-OFF - nothing should come free\n")
+    prompt_parts.append("   - Avoid easy conversions - if an antagonist changes, it should be earned through struggle\n\n")
+    prompt_parts.append("21. EMOTIONAL ARC WITH BREAKING POINTS:\n")
+    prompt_parts.append("   - If the character has an erased/lost future or emotional hook, it must be FULLY LEVERAGED\n")
+    prompt_parts.append("   - Include a moment where the character must CHOOSE between their goal and reclaiming what they lost\n")
+    prompt_parts.append("   - Show a moment where the character BREAKS EMOTIONALLY - their detachment or protection mechanism fails\n")
+    prompt_parts.append("   - The character must realize their flaw (detachment, control, etc.) is harming them, not protecting them\n")
+    prompt_parts.append("   - Emotional moments should be FELT, not just mentioned in passing\n\n")
+    prompt_parts.append("22. DANGEROUS, DISORIENTING JOURNEYS:\n")
+    prompt_parts.append("   - If the story involves metaphysical spaces, alternate realities, or abstract realms:\n")
+    prompt_parts.append("     * The journey must feel DANGEROUS and DISORIENTING\n")
+    prompt_parts.append("     * Include psychological distortion - the space should try to overwrite the character's identity\n")
+    prompt_parts.append("     * Show alternate versions of the character that challenge their sense of self\n")
+    prompt_parts.append("     * Create a moment where the character nearly LOSES THEIR ANCHOR to reality\n")
+    prompt_parts.append("     * Force the character to CHOOSE which version of themselves to be\n")
+    prompt_parts.append("   - Avoid linear progression - the journey should feel unpredictable and threatening\n\n")
+    prompt_parts.append("**ENDING (Turn, Not a Bow - With Lasting Consequences):**\n")
+    prompt_parts.append("23. End on a turn: a realization, reversal, choice, haunting image, or reframing question\n")
+    prompt_parts.append("24. The ending should feel inevitable but surprising\n")
+    prompt_parts.append("25. CRITICAL: The ending must have LASTING CONSEQUENCES:\n")
+    prompt_parts.append("   - The character must pay a COST - something is lost, scarred, or changed permanently\n")
+    prompt_parts.append("   - Include moral ambiguity - the resolution shouldn't be completely clean or unambiguous\n")
+    prompt_parts.append("   - Leave a LINGERING THREAT or uncertainty - not everything should be neatly resolved\n")
+    prompt_parts.append("   - The character should bear a SCAR (physical, emotional, or psychological) from their journey\n")
+    prompt_parts.append("   - Even small costs give the ending weight - avoid tidy resolutions that cost nothing\n")
+    prompt_parts.append("26. Don't tie everything up - short stories rarely end with everything resolved\n")
+    prompt_parts.append("27. The final beat should shift the reader's understanding while leaving something unresolved\n\n")
     
     # Calculate target word count for a standard short story (aim for substantial length)
-    # Standard short stories are typically 1,000-7,500 words
-    # Aim for 2,000-4,000 words for a substantial short story
-    target_word_count = min(max_words, max(2000, int(max_words * 0.5)))
+    # Industry standard for short stories is 3,000-7,500 words
+    # Aim for 3,500-5,500 words for a professional short story with strong structural bones
+    # IMPORTANT: This word count is for the STORY TEXT ONLY, not metadata
+    # Higher minimum ensures the story has enough "bones" to feel complete and satisfying
+    target_word_count = min(max_words, max(3500, int(max_words * 0.65)))
     
-    prompt_parts.append("**CRITICAL: Write a COMPLETE, FULL-LENGTH short story.**\n\n")
-    prompt_parts.append(f"**TARGET LENGTH: Aim for approximately {target_word_count:,} to {max_words:,} words.**\n")
-    prompt_parts.append("This must be a FULL story with:\n")
-    prompt_parts.append("- A complete beginning that establishes the world and character\n")
-    prompt_parts.append("- A developed middle with rising action and complications\n")
-    prompt_parts.append("- A satisfying ending that resolves the central conflict\n")
-    prompt_parts.append("- Multiple scenes and character interactions\n")
-    prompt_parts.append("- Dialogue, action, and description throughout\n\n")
+    prompt_parts.append("**CRITICAL: Write a COMPLETE, PROFESSIONAL-LENGTH short story with STRONG STRUCTURAL BONES.**\n\n")
+    prompt_parts.append(f"**TARGET LENGTH: The STORY TEXT ITSELF must be {target_word_count:,} to {max_words:,} words (industry standard: 3,000-7,500 words).**\n")
+    prompt_parts.append("**IMPORTANT:** This word count is for the STORY NARRATIVE ONLY - not metadata, not headers, not character descriptions.\n")
+    prompt_parts.append(f"The story text you generate must be a complete, professional-length narrative of at least {target_word_count:,} words.\n")
+    prompt_parts.append("Industry standard for short stories is 3,000-7,500 words. Your story must meet this standard.\n")
+    prompt_parts.append("**STRONG BONES:** The story must have a complete, satisfying structure that feels complete even if it's on the shorter end.\n")
+    prompt_parts.append("Every scene must be fully developed, every character interaction complete, every emotional beat fully realized.\n\n")
+    prompt_parts.append("This must be a FULL story with STRONG STRUCTURAL BONES:\n")
+    prompt_parts.append("- A complete beginning that establishes the world and character (fully developed, not rushed)\n")
+    prompt_parts.append("- A developed middle with rising action and complications (multiple scenes, not just one)\n")
+    prompt_parts.append("- A satisfying ending that resolves the central conflict (complete, not abrupt)\n")
+    prompt_parts.append("- Multiple fully-developed scenes (at least 4-6 major scenes with smooth transitions)\n")
+    prompt_parts.append("- Substantial dialogue and character interactions (dialogue should be extensive, not sparse)\n")
+    prompt_parts.append("- Rich descriptions throughout every scene (sensory details, world-building, atmosphere)\n")
+    prompt_parts.append("- Each scene must be COMPLETE - fully realized, not summarized or rushed\n")
+    prompt_parts.append("- The story must feel SATISFYING and COMPLETE - like a finished story, not an outline\n")
+    prompt_parts.append("- Substantial length: aim for {target_word_count:,} to {max_words:,} words of pure narrative prose\n\n")
     prompt_parts.append("**DO NOT:**\n")
     prompt_parts.append("- Summarize or paraphrase the story idea\n")
     prompt_parts.append("- Write a brief synopsis or outline\n")
     prompt_parts.append("- Echo back the input information\n")
-    prompt_parts.append("- Stop after a few sentences\n\n")
+    prompt_parts.append("- Stop after a few sentences\n")
+    prompt_parts.append("- Use meta-terms like 'protagonist', 'antagonist', 'main character', 'hero', 'villain' in the story text\n")
+    prompt_parts.append("- Break the fourth wall or use analytical terms - the story must be pure narrative\n")
+    prompt_parts.append("- Include metadata, constraints, or technical information in the story text\n\n")
     prompt_parts.append("**DO:**\n")
     prompt_parts.append("- Write the complete narrative prose from start to finish\n")
     prompt_parts.append("- Develop scenes with specific details and dialogue\n")
     prompt_parts.append("- Show character development through actions and interactions\n")
     prompt_parts.append("- Create a full story arc with all three acts fully developed\n")
-    prompt_parts.append("- Use vivid, specific language throughout\n\n")
+    prompt_parts.append("- Use vivid, specific language throughout\n")
+    prompt_parts.append("- Use character names, pronouns, or descriptive phrases - never meta-terms\n")
+    prompt_parts.append("- Write pure story text only - no metadata, no constraints, no technical notes\n")
+    prompt_parts.append("- DO NOT include 'Constraints:', '**Constraints:**', or any metadata at the end of the story\n")
+    prompt_parts.append("- The story must END with the narrative - nothing after the final sentence\n")
+    prompt_parts.append("- If you see constraints or metadata in your output, REMOVE IT - only return the story text\n\n")
     
+    prompt_parts.append("**WORD COUNT REQUIREMENT (CRITICAL - INDUSTRY STANDARD):**\n")
+    prompt_parts.append(f"✓ The story narrative MUST be {target_word_count:,} to {max_words:,} words long (industry standard: 3,000-7,500 words)\n")
+    prompt_parts.append("✓ This is the STORY TEXT ONLY - pure narrative prose, no metadata\n")
+    prompt_parts.append("✓ Professional short stories require substantial length: multiple scenes, extensive dialogue, rich descriptions, and full character development\n")
+    prompt_parts.append(f"✓ A professional short story of {target_word_count:,}+ words requires STRONG STRUCTURAL BONES:\n")
+    prompt_parts.append("  * Multiple fully-developed scenes with smooth transitions (at least 4-6 major scenes)\n")
+    prompt_parts.append("  * Extensive dialogue and character interactions (dialogue should be substantial, not sparse)\n")
+    prompt_parts.append("  * Rich sensory descriptions and world-building throughout every scene\n")
+    prompt_parts.append("  * Complete narrative arc with fully realized beginning, middle, and end\n")
+    prompt_parts.append("  * Character development and emotional depth that feels complete\n")
+    prompt_parts.append("  * Each scene must be FULLY DEVELOPED - not rushed or summarized\n")
+    prompt_parts.append("  * The story must feel SATISFYING and COMPLETE, not like a summary or outline\n")
+    prompt_parts.append(f"✓ If your story is under {target_word_count:,} words, you MUST EXPAND it significantly with more scenes, dialogue, descriptions, and narrative development\n")
+    prompt_parts.append("✓ Do NOT submit a story under 3,500 words - it needs strong bones to feel complete\n")
+    prompt_parts.append("✓ The goal is a story with such strong structural foundation that it feels complete and satisfying, ready for refinement\n\n")
     prompt_parts.append("**EXCELLENCE CHECKLIST (Verify Before Writing):**\n")
     prompt_parts.append("✓ Does the story revolve around ONE central emotional or narrative idea?\n")
+    prompt_parts.append("✓ Is the character CRISP and SHARP - immediately recognizable through specific details?\n")
+    prompt_parts.append("✓ Is there a CLEAR, SPECIFIC inciting incident that happens early (within first 500 words)?\n")
+    prompt_parts.append("✓ Are ALL FIVE SENSES engaged throughout the story - can the reader FEEL the world?\n")
     prompt_parts.append("✓ Does the opening create immediate tension (in medias res)?\n")
     prompt_parts.append("✓ Does every scene push the story forward (compression)?\n")
     prompt_parts.append("✓ Is the protagonist forced to make a meaningful choice?\n")
@@ -776,8 +950,8 @@ CORE PRINCIPLES:
     )
     
     # FOR FULL-LENGTH STORIES: Request MAXIMUM tokens (8192)
-    # This ensures the model has enough space to write complete stories
-    if target_word_count >= 2000:
+    # This ensures the model has enough space to write complete stories (industry standard: 3000-7500 words)
+    if target_word_count >= 3000:
         # For full-length stories, always request maximum tokens
         estimated_max_tokens = min(8192, estimated_max_tokens)
         estimated_max_tokens = max(6000, estimated_max_tokens)  # At least 6000 tokens
@@ -803,6 +977,9 @@ CORE PRINCIPLES:
             temperature=0.8,  # Slightly higher for creativity
             max_tokens=estimated_max_tokens,
         )
+        
+        # Strip any metadata that might have been appended
+        generated_text = _strip_metadata_from_story(generated_text)
         
         # Log initial generation result
         initial_word_count = len(generated_text.split()) if generated_text else 0
@@ -963,10 +1140,12 @@ def revise_story_text(
     
     system_prompt = """You are a skilled editor focused on sharpening language, eliminating clichés, and improving distinctiveness. Every word must earn its place.
 
-**CRITICAL: PRESERVE STORY LENGTH**
+**CRITICAL: PRESERVE STORY LENGTH (INDUSTRY STANDARD)**
 - The story must remain approximately the SAME LENGTH after revision
 - Do NOT shorten the story significantly
-- If the story is already full-length (2000+ words), maintain that length
+- Industry standard for short stories is 3,000-7,500 words
+- If the story is already professional-length (3000+ words), maintain that length
+- If the story is under 3,000 words, EXPAND it to meet industry standards
 - Expand descriptions and scenes if needed to maintain length while improving quality
 
 CORE EDITING PRINCIPLES:
@@ -997,18 +1176,74 @@ CORE EDITING PRINCIPLES:
    - Maintain the story's core meaning and narrative structure
    - Preserve approximately the same length as the original story
    - Stay within the maximum word count limit
-   - Improve distinctiveness WITHOUT changing the core narrative or character voices"""
+   - Improve distinctiveness WITHOUT changing the core narrative or character voices
+
+5. PRESERVE & ENHANCE DRAMATIC TENSION:
+   - MAINTAIN character resistance, failures, and breaking moments - these are essential to the story
+   - PRESERVE ideological clashes and moments where the character's argument fails
+   - KEEP emotional breaking points and moments where the character must choose between competing desires
+   - MAINTAIN dangerous, disorienting elements in metaphysical or abstract journeys
+   - PRESERVE lasting consequences, costs, and moral ambiguity in the ending
+   - If these elements are weak or missing, STRENGTHEN them rather than removing them
+   - The story should feel dramatically challenging, not easily resolved
+
+6. ENHANCE CHARACTER CRISPNESS:
+   - SHARPEN character details - make them more specific and immediately recognizable
+   - Replace vague character traits with concrete, vivid details
+   - Ensure characters are introduced through SPECIFIC actions, gestures, or speech patterns
+   - Make each character so crisp the reader can "see" them instantly
+
+7. CLARIFY INCITING INCIDENT:
+   - Ensure the inciting incident is CLEAR, SPECIFIC, and happens EARLY (within first 500 words)
+   - Make the moment of change SHARP and IMMEDIATE - a concrete event, not vague unease
+   - The reader should FEEL the shift when the inciting incident occurs
+
+8. AMPLIFY SENSORY DETAILS:
+   - ADD sensory details throughout - engage sight, sound, smell, taste, touch in every scene
+   - Make the reader FEEL the world through the character's senses
+   - Replace generic descriptions with specific sensory experiences
+   - Use sensory details to reveal character and create atmosphere
+
+6. REMOVE META-TERMS AND METADATA:
+   - REMOVE any instances of "protagonist", "antagonist", "main character", "hero", "villain" from the story text
+   - REMOVE any metadata, constraints, or technical information that may have been included
+   - CRITICAL: REMOVE any lines starting with "**Constraints:**", "Constraints:", or containing "tone:", "pace:", "pov_preference", "sensory_focus"
+   - The story text must END with the narrative - strip out ANY metadata that appears after the story
+   - The story text must be pure narrative - no analytical terms, no meta-commentary, no metadata
+   - Replace meta-terms with character names, pronouns, or descriptive phrases
+   - Ensure the story reads as a complete narrative, not a story about a story
+
+7. ENHANCE CHARACTER CRISPNESS:
+   - SHARPEN character details - make them more specific and immediately recognizable
+   - Replace vague character traits with concrete, vivid details
+   - Ensure characters are introduced through SPECIFIC actions, gestures, or speech patterns
+   - Make each character so crisp the reader can "see" them instantly
+
+8. CLARIFY INCITING INCIDENT:
+   - Ensure the inciting incident is CLEAR, SPECIFIC, and happens EARLY (within first 500 words)
+   - Make the moment of change SHARP and IMMEDIATE - a concrete event, not vague unease
+   - The reader should FEEL the shift when the inciting incident occurs
+
+9. AMPLIFY SENSORY DETAILS:
+   - ADD sensory details throughout - engage sight, sound, smell, taste, touch in every scene
+   - Make the reader FEEL the world through the character's senses
+   - Replace generic descriptions with specific sensory experiences
+   - Use sensory details to reveal character and create atmosphere"""
 
     current_words = len(text.split())
     
-    # Determine target word count - expand if too short
-    if current_words < 2000:
-        # Story is too short - expand it to full length
-        target_words = max(2000, min(int(max_words * 0.5), max_words))
-        length_instruction = f"**CRITICAL:** The story is currently only {current_words} words, which is too short. "
-        length_instruction += f"You MUST expand it to at least {target_words:,} words by adding more scenes, dialogue, descriptions, and narrative development. "
-        length_instruction += "Develop the middle section with multiple scenes. Add character interactions and dialogue. "
-        length_instruction += "Expand descriptions and add sensory details. Build to a complete, satisfying ending.\n\n"
+    # Determine target word count - expand if too short (industry standard: 3,000-7,500 words)
+    # Aim for 3,500+ to ensure strong structural bones
+    if current_words < 3500:
+        # Story is too short - expand it to meet industry standards with strong bones
+        target_words = max(3500, min(int(max_words * 0.65), max_words))
+        length_instruction = f"**CRITICAL:** The story is currently only {current_words} words, which is BELOW industry standard (3,000-7,500 words). "
+        length_instruction += f"You MUST expand it to at least {target_words:,} words to create strong structural bones. "
+        length_instruction += "Add multiple fully-developed scenes with smooth transitions (at least 4-6 major scenes total). "
+        length_instruction += "Include EXTENSIVE dialogue and character interactions - dialogue should be substantial, not sparse. "
+        length_instruction += "Expand descriptions with rich sensory details in every scene. Develop the middle section with multiple complete scenes. "
+        length_instruction += "Add character development and emotional depth. Each scene must be FULLY REALIZED, not summarized or rushed. "
+        length_instruction += "Build to a complete, satisfying ending. The story must feel COMPLETE and SATISFYING, not like an outline.\n\n"
     else:
         # Story is already full-length - preserve similar length
         target_words = min(current_words, max_words)
@@ -1035,8 +1270,11 @@ CORE EDITING PRINCIPLES:
     prompt_parts.append("2. CHARACTER VOICE: Preserve and strengthen each character's unique voice—maintain their speech patterns, vocabulary, and rhythm\n")
     prompt_parts.append("3. TONE CONSISTENCY: Maintain the established tone throughout—do not introduce tone shifts\n")
     prompt_parts.append("4. LANGUAGE PRECISION: Sharpen vague language while preserving meaning and voice\n")
-    if current_words < 2000:
-        prompt_parts.append(f"5. LENGTH: Expand the story from {current_words} words to at least {target_words:,} words\n")
+    if current_words < 3500:
+        prompt_parts.append(f"5. LENGTH: Expand the story from {current_words} words to at least {target_words:,} words with strong structural bones (industry standard: 3,000-7,500 words)\n")
+        prompt_parts.append("   - Add multiple fully-developed scenes (at least 4-6 major scenes total)\n")
+        prompt_parts.append("   - Include extensive dialogue - make conversations substantial, not sparse\n")
+        prompt_parts.append("   - Fully develop each scene - no rushing or summarizing\n")
     else:
         prompt_parts.append(f"5. LENGTH: Keep approximately the same length as the original ({current_words} words)\n")
     prompt_parts.append("6. COMPLETENESS: Provide the COMPLETE revised story—do not truncate or shorten\n\n")
@@ -1052,17 +1290,22 @@ CORE EDITING PRINCIPLES:
     prompt_parts.append("4. Sharpen vague descriptions with concrete, sensory details\n")
     prompt_parts.append("5. Ensure character quirks and contradictions are evident in their speech patterns\n")
     prompt_parts.append("6. Maintain narrative structure and meaning while improving language quality\n")
-    if current_words < 2000:
-        prompt_parts.append(f"7. Expand the narrative to at least {target_words:,} words while maintaining quality\n\n")
+    if current_words < 3500:
+        prompt_parts.append(f"7. Expand the narrative to at least {target_words:,} words with strong structural bones (industry standard: 3,000-7,500 words) while maintaining quality\n")
+        prompt_parts.append("   - Add multiple fully-developed scenes with smooth transitions\n")
+        prompt_parts.append("   - Include extensive dialogue - make conversations substantial\n")
+        prompt_parts.append("   - Fully develop each scene - no rushing or summarizing\n\n")
     else:
         prompt_parts.append(f"7. Preserve the approximate length ({current_words} words) and complete narrative\n\n")
     
-    if current_words < 2000:
+    if current_words < 3500:
         prompt_parts.append(f"Provide the COMPLETE, EXPANDED revised story. ")
-        prompt_parts.append(f"The story must be expanded from {current_words} words to at least {target_words:,} words. ")
-        prompt_parts.append("Add more scenes, dialogue, descriptions, and narrative development. ")
-        prompt_parts.append("Develop the middle section with multiple scenes and character interactions. ")
-        prompt_parts.append("Expand descriptions with sensory details. Build to a complete, satisfying ending. ")
+        prompt_parts.append(f"The story must be expanded from {current_words} words to at least {target_words:,} words with strong structural bones (industry standard: 3,000-7,500 words). ")
+        prompt_parts.append("Add multiple fully-developed scenes with smooth transitions (at least 4-6 major scenes total). ")
+        prompt_parts.append("Include EXTENSIVE dialogue and character interactions - dialogue should be substantial, not sparse. ")
+        prompt_parts.append("Develop the middle section with multiple complete scenes. Expand descriptions with rich sensory details in every scene. ")
+        prompt_parts.append("Add character development and emotional depth. Each scene must be FULLY REALIZED, not summarized or rushed. ")
+        prompt_parts.append("Build to a complete, satisfying ending. The story must feel COMPLETE and SATISFYING, not like an outline. ")
     else:
         prompt_parts.append("Provide the COMPLETE revised story. ")
         prompt_parts.append(f"Maintain similar length ({current_words:,} words). ")
@@ -1084,8 +1327,8 @@ CORE EDITING PRINCIPLES:
     )
     
     # For short stories, ensure we request enough tokens
-    if current_words < 2000:
-        estimated_max_tokens = max(estimated_max_tokens, 6000)  # At least 6000 tokens for expansion
+    if current_words < 3500:
+        estimated_max_tokens = max(estimated_max_tokens, 6000)  # At least 6000 tokens for expansion to strong structural bones
     
     # Generate revision
     revised_text = client.generate(
@@ -1094,6 +1337,9 @@ CORE EDITING PRINCIPLES:
         temperature=0.6,  # Lower temperature for more focused revision
         max_tokens=estimated_max_tokens,
     )
+    
+    # Strip any metadata that might have been appended
+    revised_text = _strip_metadata_from_story(revised_text)
     
     return revised_text
 

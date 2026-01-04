@@ -250,7 +250,21 @@ function setupFormSubmission() {
     } catch (error) {
         showError(error.message, error.error_code || 'GENERATION_ERROR');
     } finally {
-        setTimeout(() => hideLoading(), 500);
+        setTimeout(() => {
+            hideLoading();
+            // Reset regenerate button if it exists
+            const regenerateBtn = document.getElementById('regenerate-btn');
+            if (regenerateBtn) {
+                regenerateBtn.disabled = false;
+                regenerateBtn.innerHTML = '<i data-lucide="refresh-cw" class="w-4 h-4 inline mr-2"></i>Regenerate';
+                initializeIcons(regenerateBtn);
+            }
+            // Reset loading text
+            const loadingText = document.getElementById('loading-text');
+            if (loadingText) {
+                loadingText.textContent = 'Generating your story...';
+            }
+        }, 500);
     }
     });
 }
@@ -337,9 +351,35 @@ if (saveBtn) {
 }
 
 // Regenerate button
-document.getElementById('regenerate-btn').addEventListener('click', () => {
-    document.getElementById('story-form').dispatchEvent(new Event('submit'));
-});
+const regenerateBtn = document.getElementById('regenerate-btn');
+if (regenerateBtn) {
+    regenerateBtn.addEventListener('click', async () => {
+        // Check if form is valid before regenerating
+        const idea = document.getElementById('idea').value.trim();
+        if (!idea) {
+            showError('Story idea is required to regenerate. Please enter a story idea first.', 'MISSING_IDEA');
+            return;
+        }
+        
+        // Show loading state on button
+        regenerateBtn.disabled = true;
+        const originalText = regenerateBtn.innerHTML;
+        regenerateBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 inline mr-2 animate-spin"></i>Regenerating...';
+        initializeIcons(regenerateBtn);
+        
+        // Update loading text to indicate regeneration
+        const loadingText = document.getElementById('loading-text');
+        if (loadingText) {
+            loadingText.textContent = 'Regenerating your story with enhanced dramatic tension...';
+        }
+        
+        // Trigger form submission (which has its own loading indicators)
+        document.getElementById('story-form').dispatchEvent(new Event('submit'));
+        
+        // Re-enable button after a delay (form submission will handle the actual completion)
+        // We'll reset it in the form submission handler
+    });
+}
 
 // Validate button
 document.getElementById('validate-btn').addEventListener('click', async () => {
@@ -404,10 +444,18 @@ function setupExportMenu() {
     document.querySelectorAll('.export-option').forEach(option => {
         option.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const format = e.target.closest('.export-option').getAttribute('data-format') || 
+            const format = option.getAttribute('data-format') || 
+                          e.target.closest('.export-option')?.getAttribute('data-format') || 
                           e.target.getAttribute('data-format');
+            
+            if (!format) {
+                showError('Export format not specified. Please try again.', 'EXPORT_FORMAT_ERROR');
+                return;
+            }
+            
             await exportStory(format);
-            exportMenu.style.display = 'none';
+            exportMenu.classList.add('hidden');
+            exportMenu.classList.remove('show');
         });
     });
 }
@@ -424,11 +472,17 @@ async function exportStory(format) {
         return;
     }
     
+    if (!format) {
+        showError('Export format not specified.', 'EXPORT_FORMAT_ERROR');
+        return;
+    }
+    
     try {
         const response = await fetch(`${API_BASE}/story/${currentStoryId}/export/${format}`);
         
         if (!response.ok) {
-            throw await handleApiError(response, 'Export failed', 'EXPORT_ERROR');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Export failed: ${response.statusText}`);
         }
         
         // Download the file
@@ -455,7 +509,8 @@ async function exportStory(format) {
         
         showSuccess(`Story exported as ${format.toUpperCase()} successfully!`);
     } catch (error) {
-        showError(error.message, error.error_code || 'EXPORT_ERROR');
+        console.error('Export error:', error);
+        showError(error.message || 'Export failed. Please try again.', 'EXPORT_ERROR');
     }
 }
 
