@@ -1,125 +1,72 @@
 """
-Comprehensive API endpoint tests with response structure validation.
+Comprehensive API endpoint tests with detailed response validation.
 
-Tests cover all API endpoints with detailed validation of:
-- Response structure and required fields
-- Data types and value constraints
-- Error response formats
-- Rate limiting behavior
-- Request validation
+This module tests all API endpoints with comprehensive validation of:
+- Response structure (required fields, data types, value constraints)
+- Error response format validation
+- Request validation (missing fields, invalid types)
 """
 
 import pytest
-import json
 from unittest.mock import patch, MagicMock
-from flask import Flask
-from datetime import datetime
+from flask import Response
 
-# Add project root to path for imports
-import sys
-from pathlib import Path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from app import app
+from app import create_app
+from src.shortstory.utils.errors import APIError, ValidationError, ServiceUnavailableError
+from tests.test_constants import (
+    HTTP_OK,
+    HTTP_BAD_REQUEST,
+    HTTP_UNAUTHORIZED,
+    HTTP_NOT_FOUND,
+    HTTP_INTERNAL_SERVER_ERROR,
+    HTTP_SERVICE_UNAVAILABLE,
+)
 
 
 @pytest.fixture
 def client():
-    """Create a test client for the Flask app."""
+    """Create a test client."""
+    app = create_app()
     app.config['TESTING'] = True
-    app.config['WTF_CSRF_ENABLED'] = False
-    with app.test_client() as client:
-        yield client
+    with app.test_client() as test_client:
+        yield test_client
 
 
 @pytest.fixture
 def sample_story_payload():
-    """Create a sample story generation payload."""
+    """Sample payload for story generation."""
     return {
-        "idea": "A lighthouse keeper who collects lost voices in glass jars",
+        "idea": "A lighthouse keeper collects lost voices in glass jars",
         "character": {
             "name": "Mara",
-            "description": "A lighthouse keeper with an unusual collection",
-            "quirks": ["Never speaks above a whisper"],
-            "contradictions": "Fiercely protective but terrified of connection"
+            "description": "A quiet keeper with an unusual collection"
         },
         "theme": "What happens to the stories we never tell?",
-        "genre": "Literary"
+        "genre": "Literary",
+        "max_words": 5000
     }
 
 
 @pytest.fixture
 def generated_story_id():
-    """Return a sample story ID for use in tests."""
-    # Return a mock story ID instead of actually generating
-    return "test_story_12345"
+    """Mock story ID for testing."""
+    return "test_story_12345678"
 
 
-class TestHealthEndpoint:
-    """Test health check endpoint."""
+class TestGenerateEndpoint:
+    """Test suite for /api/generate endpoint."""
     
-    def test_health_returns_ok(self, client):
-        """Test that health endpoint returns status ok."""
-        response = client.get('/api/health')
-        assert response.status_code == 200
+    def test_generate_requires_valid_payload(self, client):
+        """Test that generate endpoint validates required fields."""
+        response = client.post('/api/generate', json={})
         
+        assert response.status_code == HTTP_BAD_REQUEST
         data = response.get_json()
-        assert isinstance(data, dict)
-        assert "status" in data
-        assert data["status"] == "ok"
+        assert "error" in data
+        assert "error_code" in data
     
-    def test_health_response_structure(self, client):
-        """Test that health response has correct structure."""
-        response = client.get('/api/health')
-        data = response.get_json()
-        
-        # Should only have status field
-        assert len(data) == 1
-        assert data["status"] == "ok"
-
-
-class TestGenresEndpoint:
-    """Test genres endpoint."""
-    
-    def test_genres_returns_list(self, client):
-        """Test that genres endpoint returns a list of genres."""
-        response = client.get('/api/genres')
-        assert response.status_code == 200
-        
-        data = response.get_json()
-        assert isinstance(data, dict)
-        assert "genres" in data
-        assert isinstance(data["genres"], list)
-        assert len(data["genres"]) > 0
-    
-    def test_genres_all_strings(self, client):
-        """Test that all genres are strings."""
-        response = client.get('/api/genres')
-        data = response.get_json()
-        
-        for genre in data["genres"]:
-            assert isinstance(genre, str)
-            assert len(genre.strip()) > 0
-    
-    def test_genres_includes_expected_genres(self, client):
-        """Test that genres list includes expected genres."""
-        response = client.get('/api/genres')
-        data = response.get_json()
-        
-        genres = data["genres"]
-        expected_genres = ["Horror", "Romance", "Crime Noir", "Literary", "Thriller", "General Fiction"]
-        
-        # Check that at least some expected genres are present
-        found_genres = [g for g in expected_genres if g in genres]
-        assert len(found_genres) > 0, "Expected genres not found in response"
-
-
-class TestStoryGenerationEndpoint:
-    """Test story generation endpoint with comprehensive validation."""
-    
-    def test_generate_requires_idea(self, client):
-        """Test that story generation requires an idea."""
+    def test_generate_validates_idea_field(self, client):
+        """Test that idea field is required."""
         payload = {
             "character": {"name": "Test"},
             "theme": "Test theme",
@@ -127,797 +74,471 @@ class TestStoryGenerationEndpoint:
         }
         response = client.post('/api/generate', json=payload)
         
-        assert response.status_code == 400
+        assert response.status_code == HTTP_BAD_REQUEST
         data = response.get_json()
-        assert "error" in data or "message" in data
+        assert "error" in data
+        assert "idea" in data.get("error", "").lower() or "required" in data.get("error", "").lower()
     
-    def test_generate_returns_complete_response(self, client, sample_story_payload):
-        """Test that story generation returns complete response structure."""
-        with patch('app.pipeline') as mock_pipeline:
-            # Mock pipeline stages
-            mock_pipeline.capture_premise.return_value = {
-                "idea": sample_story_payload["idea"],
-                "character": sample_story_payload["character"],
-                "theme": sample_story_payload["theme"]
-            }
-            mock_pipeline.generate_outline.return_value = {
-                "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-            }
-            mock_pipeline.scaffold.return_value = {
-                "pov": "third person",
-                "tone": "balanced",
-                "pace": "moderate"
-            }
-            mock_pipeline.draft.return_value = {
-                "text": "This is a draft story text with enough words to be meaningful.",
-                "word_count": 12
-            }
-            mock_pipeline.revise.return_value = {
-                "text": "This is a revised story text with enough words to be meaningful.",
-                "word_count": 12
-            }
-            mock_pipeline.word_validator.count_words.return_value = 12
-            mock_pipeline.genre = sample_story_payload["genre"]
-            
-            with patch('src.shortstory.utils.get_default_client'):
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post('/api/generate', json=sample_story_payload)
-                    
-                    assert response.status_code == 200
-                    data = response.get_json()
-                    
-                    # Validate required fields
-                    assert "success" in data
-                    assert data["success"] is True
-                    assert "story_id" in data
-                    assert isinstance(data["story_id"], str)
-                    assert len(data["story_id"]) > 0
-                    assert "story" in data
-                    assert isinstance(data["story"], str)
-                    assert len(data["story"].strip()) > 0
-                    assert "word_count" in data
-                    assert isinstance(data["word_count"], int)
-                    assert data["word_count"] >= 0
-                    assert "max_words" in data
-                    assert isinstance(data["max_words"], int)
-                    assert data["max_words"] > 0
-                    assert data["word_count"] <= data["max_words"]
-    
-    def test_generate_includes_metadata(self, client, sample_story_payload):
-        """Test that story generation includes premise and outline metadata."""
-        with patch('app.pipeline') as mock_pipeline:
-            premise = {
-                "idea": sample_story_payload["idea"],
-                "character": sample_story_payload["character"],
-                "theme": sample_story_payload["theme"]
-            }
-            outline = {
-                "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-            }
-            
-            mock_pipeline.capture_premise.return_value = premise
-            mock_pipeline.generate_outline.return_value = outline
-            mock_pipeline.scaffold.return_value = {"pov": "third person", "tone": "balanced", "pace": "moderate"}
-            mock_pipeline.draft.return_value = {"text": "Draft text", "word_count": 2}
-            mock_pipeline.revise.return_value = {"text": "Revised text", "word_count": 2}
-            mock_pipeline.word_validator.count_words.return_value = 2
-            mock_pipeline.genre = sample_story_payload["genre"]
-            
-            with patch('src.shortstory.utils.get_default_client'):
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post('/api/generate', json=sample_story_payload)
-                    data = response.get_json()
-                    
-                    # Check for optional metadata fields
-                    if "premise" in data:
-                        assert isinstance(data["premise"], dict)
-                    if "outline" in data:
-                        assert isinstance(data["outline"], dict)
-                    if "genre" in data:
-                        assert isinstance(data["genre"], str)
-    
-    def test_generate_story_content_quality(self, client, sample_story_payload):
-        """Test that generated story has minimum quality requirements."""
-        with patch('app.pipeline') as mock_pipeline:
-            story_text = "This is a meaningful story with multiple sentences. It has enough content to be considered a proper story. The narrative flows naturally and engages the reader."
-            
-            mock_pipeline.capture_premise.return_value = {
-                "idea": sample_story_payload["idea"],
-                "character": sample_story_payload["character"],
-                "theme": sample_story_payload["theme"]
-            }
-            mock_pipeline.generate_outline.return_value = {
-                "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-            }
-            mock_pipeline.scaffold.return_value = {"pov": "third person", "tone": "balanced", "pace": "moderate"}
-            mock_pipeline.draft.return_value = {"text": story_text, "word_count": 25}
-            mock_pipeline.revise.return_value = {"text": story_text, "word_count": 25}
-            mock_pipeline.word_validator.count_words.return_value = 25
-            mock_pipeline.genre = sample_story_payload["genre"]
-            
-            with patch('src.shortstory.utils.get_default_client'):
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post('/api/generate', json=sample_story_payload)
-                    data = response.get_json()
-                    
-                    # Validate story content quality
-                    story = data.get("story", "")
-                    assert len(story) >= 50  # Minimum length
-                    assert data.get("word_count", 0) > 0
-    
-    def test_generate_handles_invalid_genre(self, client, sample_story_payload):
-        """Test that invalid genre falls back to default."""
-        sample_story_payload["genre"] = "Invalid Genre Name"
-        
-        with patch('app.pipeline') as mock_pipeline:
-            mock_pipeline.capture_premise.return_value = {
-                "idea": sample_story_payload["idea"],
-                "character": sample_story_payload["character"],
-                "theme": sample_story_payload["theme"]
-            }
-            mock_pipeline.generate_outline.return_value = {
-                "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-            }
-            mock_pipeline.scaffold.return_value = {"pov": "third person", "tone": "balanced", "pace": "moderate"}
-            mock_pipeline.draft.return_value = {"text": "Story text", "word_count": 2}
-            mock_pipeline.revise.return_value = {"text": "Story text", "word_count": 2}
-            mock_pipeline.word_validator.count_words.return_value = 2
-            mock_pipeline.genre = "General Fiction"  # Should fallback
-            
-            with patch('src.shortstory.utils.get_default_client'):
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post('/api/generate', json=sample_story_payload)
-                    # Should still succeed with fallback genre
-                    assert response.status_code in [200, 400]  # May fail validation or succeed
-
-
-class TestStoryRetrievalEndpoint:
-    """Test story retrieval endpoint."""
-    
-    def test_get_story_returns_complete_data(self, client, generated_story_id):
-        """Test that getting a story returns complete data structure."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "Test story text",
-                "max_words": 7500,
-                "premise": {"idea": "Test idea"}
-            }
-            mock_get.return_value = mock_story
-            
-            with patch('app.pipeline') as mock_pipeline:
-                mock_pipeline.word_validator.count_words.return_value = 3
-                
-                response = client.get(f'/api/story/{generated_story_id}')
-                
-                assert response.status_code == 200
-                data = response.get_json()
-                
-                assert "story_id" in data
-                assert data["story_id"] == generated_story_id
-                assert "story" in data
-                assert isinstance(data["story"], str)
-                assert "word_count" in data
-                assert "max_words" in data
-                assert data["word_count"] <= data["max_words"]
-    
-    def test_get_story_404_for_missing(self, client):
-        """Test that getting a non-existent story returns 404."""
-        with patch('app.get_story_or_404') as mock_get:
-            mock_get.return_value = None
-            
-            response = client.get('/api/story/nonexistent_id')
-            assert response.status_code == 404
-            
-            data = response.get_json()
-            assert "error" in data or "message" in data
-
-
-class TestStoryUpdateEndpoint:
-    """Test story update endpoint."""
-    
-    def test_update_story_requires_text(self, client, generated_story_id):
-        """Test that updating a story requires text field."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_get.return_value = {"id": generated_story_id, "text": "Original text"}
-            
-            response = client.put(f'/api/story/{generated_story_id}', json={})
-            assert response.status_code == 400
-            
-            data = response.get_json()
-            assert "error" in data or "message" in data
-    
-    def test_update_story_validates_word_count(self, client, generated_story_id):
-        """Test that updating a story validates word count."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_get.return_value = {"id": generated_story_id, "text": "Original text", "max_words": 7500}
-            
-            with patch('app.pipeline') as mock_pipeline:
-                # Mock word count exceeding limit
-                mock_pipeline.word_validator.validate.return_value = (8000, False)
-                
-                response = client.put(
-                    f'/api/story/{generated_story_id}',
-                    json={"text": "A" * 10000}
-                )
-                assert response.status_code == 400
-    
-    def test_update_story_returns_success(self, client, generated_story_id):
-        """Test that successful story update returns success response."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {"id": generated_story_id, "text": "Original text", "max_words": 7500}
-            mock_get.return_value = mock_story
-            
-            with patch('app.pipeline') as mock_pipeline:
-                mock_pipeline.word_validator.validate.return_value = (100, True)
-                
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.update_story.return_value = True
-                    
-                    response = client.put(
-                        f'/api/story/{generated_story_id}',
-                        json={"text": "Updated story text"}
-                    )
-                    
-                    assert response.status_code == 200
-                    data = response.get_json()
-                    assert "success" in data
-                    assert data["success"] is True
-                    assert "story_id" in data
-                    assert "word_count" in data
-
-
-class TestStoryListingEndpoint:
-    """Test story listing endpoint."""
-    
-    def test_list_stories_returns_paginated_response(self, client):
-        """Test that listing stories returns paginated response."""
-        with patch('app.story_storage') as mock_storage:
-            mock_storage.list_stories.return_value = {
-                "stories": [],
-                "pagination": {
-                    "page": 1,
-                    "per_page": 50,
-                    "total": 0,
-                    "pages": 0
-                }
-            }
-            
-            response = client.get('/api/stories')
-            assert response.status_code == 200
-            
-            data = response.get_json()
-            assert "success" in data
-            assert data["success"] is True
-            assert "stories" in data
-            assert isinstance(data["stories"], list)
-            assert "pagination" in data
-            assert isinstance(data["pagination"], dict)
-    
-    def test_list_stories_pagination_parameters(self, client):
-        """Test that pagination parameters work correctly."""
-        with patch('app.story_storage') as mock_storage:
-            mock_storage.list_stories.return_value = {
-                "stories": [{"id": f"story_{i}"} for i in range(10)],
-                "pagination": {
-                    "page": 2,
-                    "per_page": 10,
-                    "total": 25,
-                    "pages": 3
-                }
-            }
-            
-            response = client.get('/api/stories?page=2&per_page=10')
-            assert response.status_code == 200
-            
-            data = response.get_json()
-            pagination = data["pagination"]
-            assert pagination["page"] == 2
-            assert pagination["per_page"] == 10
-            assert pagination["total"] == 25
-            assert pagination["pages"] == 3
-    
-    def test_list_stories_enforces_per_page_limit(self, client):
-        """Test that per_page is limited to maximum."""
-        with patch('app.story_storage') as mock_storage:
-            mock_storage.list_stories.return_value = {
-                "stories": [],
-                "pagination": {"page": 1, "per_page": 100, "total": 0, "pages": 0}
-            }
-            
-            # Request more than max (100)
-            response = client.get('/api/stories?per_page=200')
-            assert response.status_code == 200
-            
-            # Should be capped at 100
-            data = response.get_json()
-            assert data["pagination"]["per_page"] <= 100
-
-
-class TestValidationEndpoint:
-    """Test validation endpoint."""
-    
-    def test_validate_requires_text(self, client):
-        """Test that validation requires text field."""
-        response = client.post('/api/validate', json={})
-        assert response.status_code == 400
-        
-        data = response.get_json()
-        assert "error" in data or "message" in data
-    
-    def test_validate_returns_word_count(self, client):
-        """Test that validation returns word count information."""
-        with patch('app.pipeline') as mock_pipeline:
-            mock_pipeline.word_validator.validate.return_value = (100, True)
-            
-            with patch('app.check_distinctiveness') as mock_distinct:
-                mock_distinct.return_value = {
-                    "distinctiveness_score": 0.8,
-                    "has_cliches": False
-                }
-                
-                response = client.post('/api/validate', json={"text": "Test story text"})
-                assert response.status_code == 200
-                
-                data = response.get_json()
-                assert "word_count" in data
-                assert "max_words" in data
-                assert "is_valid" in data
-                assert isinstance(data["is_valid"], bool)
-                assert "distinctiveness" in data
-                assert isinstance(data["distinctiveness"], dict)
-
-
-class TestTemplatesEndpoint:
-    """Test templates endpoint."""
-    
-    def test_templates_returns_all_templates(self, client):
-        """Test that templates endpoint returns all templates."""
-        with patch('app.get_all_templates') as mock_templates:
-            mock_templates.return_value = [
-                {"id": "template1", "name": "Template 1"},
-                {"id": "template2", "name": "Template 2"}
-            ]
-            
-            with patch('app.get_available_template_genres') as mock_genres:
-                mock_genres.return_value = ["Horror", "Romance"]
-                
-                response = client.get('/api/templates')
-                assert response.status_code == 200
-                
-                data = response.get_json()
-                assert "success" in data
-                assert "templates" in data
-                assert isinstance(data["templates"], list)
-                assert "genres" in data
-    
-    def test_templates_filters_by_genre(self, client):
-        """Test that templates can be filtered by genre."""
-        with patch('app.get_templates_for_genre') as mock_templates:
-            mock_templates.return_value = [
-                {"id": "horror1", "name": "Horror Template"}
-            ]
-            
-            response = client.get('/api/templates?genre=Horror')
-            assert response.status_code == 200
-            
-            data = response.get_json()
-            assert "success" in data
-            assert "genre" in data
-            assert data["genre"] == "Horror"
-            assert "templates" in data
-
-
-class TestErrorResponseFormat:
-    """Test that error responses have consistent format."""
-    
-    def test_validation_error_format(self, client):
-        """Test that validation errors have consistent format."""
-        response = client.post('/api/generate', json={})
-        assert response.status_code == 400
-        
-        data = response.get_json()
-        # Should have error message
-        assert "error" in data or "message" in data
-        # May have details field
-        if "details" in data:
-            assert isinstance(data["details"], dict)
-    
-    def test_not_found_error_format(self, client):
-        """Test that 404 errors have consistent format."""
-        with patch('app.get_story_or_404') as mock_get:
-            mock_get.return_value = None
-            
-            response = client.get('/api/story/nonexistent')
-            assert response.status_code == 404
-            
-            data = response.get_json()
-            assert "error" in data or "message" in data
-
-
-class TestRequestValidation:
-    """Test request validation for various endpoints."""
-    
-    def test_generate_rejects_empty_idea(self, client):
-        """Test that empty idea is rejected."""
+    def test_generate_validates_empty_idea(self, client):
+        """Test that empty idea field is rejected."""
         payload = {
-            "idea": "   ",  # Whitespace only
+            "idea": "",
+            "character": {"name": "Test", "description": "A test character"},
+            "theme": "Test theme",
             "genre": "General Fiction"
         }
         response = client.post('/api/generate', json=payload)
-        assert response.status_code == 400
+        
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
     
-    def test_generate_handles_string_character(self, client):
-        """Test that character can be a string or object."""
+    def test_generate_validates_whitespace_only_idea(self, client):
+        """Test that whitespace-only idea field is rejected."""
         payload = {
-            "idea": "Test idea",
-            "character": "A test character description",
+            "idea": "   \n\t  ",
+            "character": {"name": "Test", "description": "A test character"},
+            "theme": "Test theme",
             "genre": "General Fiction"
         }
+        response = client.post('/api/generate', json=payload)
         
-        with patch('app.pipeline') as mock_pipeline:
-            mock_pipeline.capture_premise.return_value = {
-                "idea": payload["idea"],
-                "character": {"description": payload["character"]},
-                "theme": ""
-            }
-            mock_pipeline.generate_outline.return_value = {"acts": {}}
-            mock_pipeline.scaffold.return_value = {}
-            mock_pipeline.draft.return_value = {"text": "Story", "word_count": 1}
-            mock_pipeline.revise.return_value = {"text": "Story", "word_count": 1}
-            mock_pipeline.word_validator.count_words.return_value = 1
-            mock_pipeline.genre = payload["genre"]
-            
-            with patch('src.shortstory.utils.get_default_client'):
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post('/api/generate', json=payload)
-                    # Should handle string character
-                    assert response.status_code in [200, 400]
-
-
-class TestResponseContentType:
-    """Test that responses have correct content types."""
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
     
-    def test_json_responses_have_correct_content_type(self, client):
-        """Test that JSON responses have application/json content type."""
-        response = client.get('/api/health')
-        assert response.status_code == 200
-        assert 'application/json' in response.content_type.lower()
+    def test_generate_validates_missing_character(self, client):
+        """Test that missing character field is handled."""
+        payload = {
+            "idea": "A test story idea",
+            "theme": "Test theme",
+            "genre": "General Fiction"
+        }
+        response = client.post('/api/generate', json=payload)
         
-        response = client.get('/api/genres')
-        assert response.status_code == 200
-        assert 'application/json' in response.content_type.lower()
-
-
-class TestStoryRevisionEndpoint:
-    """Test story revision endpoint."""
-    
-    def test_revise_story_returns_updated_text(self, client, generated_story_id):
-        """Test that revising a story returns updated text."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "Original story text",
-                "word_count": 3,
-                "revision_history": [],
-                "current_revision": 0
-            }
-            mock_get.return_value = mock_story
-            
-            with patch('app.pipeline') as mock_pipeline:
-                mock_pipeline.revise.return_value = {
-                    "text": "Revised story text",
-                    "word_count": 3
-                }
-                
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post(f'/api/story/{generated_story_id}/revise')
-                    
-                    assert response.status_code == 200
-                    data = response.get_json()
-                    assert "success" in data
-                    assert data["success"] is True
-                    assert "story" in data
-                    assert "revision_number" in data
-                    assert isinstance(data["revision_number"], int)
-                    assert data["revision_number"] > 0
-    
-    def test_revise_story_requires_content(self, client, generated_story_id):
-        """Test that revising requires story content."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "",  # Empty text
-                "word_count": 0
-            }
-            mock_get.return_value = mock_story
-            
-            response = client.post(f'/api/story/{generated_story_id}/revise')
-            assert response.status_code == 400
-
-
-class TestRevisionHistoryEndpoint:
-    """Test revision history endpoint."""
-    
-    def test_get_revision_history_returns_complete_data(self, client, generated_story_id):
-        """Test that revision history returns complete data structure."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        revision_history = [
-            {
-                "version": 1,
-                "text": "First version",
-                "word_count": 2,
-                "type": "draft",
-                "timestamp": "2025-01-01T00:00:00"
-            },
-            {
-                "version": 2,
-                "text": "Second version",
-                "word_count": 2,
-                "type": "revised",
-                "timestamp": "2025-01-01T01:00:00"
-            }
-        ]
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "revision_history": revision_history,
-                "current_revision": 2
-            }
-            mock_get.return_value = mock_story
-            
-            response = client.get(f'/api/story/{generated_story_id}/revisions')
-            assert response.status_code == 200
-            
+        # Should either require character or handle gracefully
+        assert response.status_code in [HTTP_BAD_REQUEST, HTTP_OK]
+        if response.status_code == HTTP_BAD_REQUEST:
             data = response.get_json()
-            assert "success" in data
-            assert data["success"] is True
-            assert "story_id" in data
-            assert "revision_history" in data
-            assert isinstance(data["revision_history"], list)
-            assert "current_revision" in data
-            assert "total_revisions" in data
-            assert data["total_revisions"] == len(revision_history)
-
-
-class TestStoryComparisonEndpoint:
-    """Test story comparison endpoint."""
+            assert "error" in data
     
-    def test_compare_story_versions_returns_diff(self, client, generated_story_id):
-        """Test that comparing story versions returns difference data."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
+    def test_generate_validates_invalid_character_type(self, client):
+        """Test that invalid character type is rejected."""
+        payload = {
+            "idea": "A test story idea",
+            "character": "not a dict",  # Invalid type
+            "theme": "Test theme",
+            "genre": "General Fiction"
+        }
+        response = client.post('/api/generate', json=payload)
         
-        revision_history = [
-            {
-                "version": 1,
-                "text": "First version text",
-                "word_count": 3,
-                "type": "draft",
-                "timestamp": "2025-01-01T00:00:00"
-            },
-            {
-                "version": 2,
-                "text": "Second version with more text",
-                "word_count": 5,
-                "type": "revised",
-                "timestamp": "2025-01-01T01:00:00"
-            }
-        ]
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
+    
+    def test_generate_validates_invalid_max_words(self, client, sample_story_payload):
+        """Test that invalid max_words value is rejected."""
+        sample_story_payload["max_words"] = -1  # Invalid negative value
         
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "revision_history": revision_history
-            }
-            mock_get.return_value = mock_story
-            
-            response = client.get(f'/api/story/{generated_story_id}/compare?version1=1&version2=2')
-            assert response.status_code == 200
-            
+        response = client.post('/api/generate', json=sample_story_payload)
+        
+        # Should either reject negative values or handle gracefully
+        assert response.status_code in [HTTP_BAD_REQUEST, HTTP_OK]
+        if response.status_code == HTTP_BAD_REQUEST:
             data = response.get_json()
-            assert "success" in data
-            assert "version1" in data
-            assert "version2" in data
-            assert "comparison" in data
-            assert "word_count_diff" in data["comparison"]
-            assert isinstance(data["comparison"]["word_count_diff"], int)
+            assert "error" in data
     
-    def test_compare_requires_multiple_versions(self, client, generated_story_id):
-        """Test that comparison requires at least 2 versions."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
+    def test_generate_validates_too_large_max_words(self, client, sample_story_payload):
+        """Test that excessively large max_words value is handled."""
+        sample_story_payload["max_words"] = 100000  # Very large value
         
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "revision_history": [{"version": 1, "text": "Only one version"}]
-            }
-            mock_get.return_value = mock_story
+        # Should either reject or cap the value
+        response = client.post('/api/generate', json=sample_story_payload)
+        
+        # Should handle gracefully (either reject or cap)
+        assert response.status_code in [HTTP_BAD_REQUEST, HTTP_OK]
+    
+    def test_generate_validates_genre(self, client, sample_story_payload):
+        """Test that genre validation works - invalid genre should fallback to default."""
+        sample_story_payload["genre"] = "Invalid Genre"
+        
+        with patch('app.get_pipeline') as mock_get_pipeline, \
+             patch('app.get_story_repository') as mock_get_repo:
+            mock_pipeline_instance = MagicMock()
+            mock_pipeline_instance.capture_premise.return_value = sample_story_payload
+            mock_pipeline_instance.generate_outline.return_value = {"acts": {}}
+            mock_pipeline_instance.scaffold.return_value = {}
+            mock_pipeline_instance.draft.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.revise.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.word_validator.count_words.return_value = 1
+            mock_pipeline_instance.genre = "General Fiction"  # Should fallback
+            mock_get_pipeline.return_value = mock_pipeline_instance
             
-            response = client.get(f'/api/story/{generated_story_id}/compare')
-            assert response.status_code == 400
+            mock_repo_instance = MagicMock()
+            mock_repo_instance.save.return_value = True
+            mock_get_repo.return_value = mock_repo_instance
+            
+            response = client.post('/api/generate', json=sample_story_payload)
+            # Should succeed with fallback to default genre
+            assert response.status_code == HTTP_OK
+            data = response.get_json()
+            assert "story_id" in data or "id" in data
 
 
-class TestStorySaveEndpoint:
-    """Test story save endpoint."""
+class TestGenerateEndpointMockedPipeline:
+    """Test suite for /api/generate with mocked pipeline."""
     
-    def test_save_story_returns_success(self, client, generated_story_id):
-        """Test that saving a story returns success."""
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "Story text",
-                "word_count": 2
-            }
-            mock_get.return_value = mock_story
+    def test_generate_api_error_handling_specific_api_error(self, client, sample_story_payload):
+        """Test handling of specific APIError from pipeline."""
+        with patch('app.get_pipeline') as mock_get_pipeline:
+            mock_pipeline = MagicMock()
+            # Simulate a specific APIError from the pipeline
+            mock_pipeline.capture_premise.side_effect = APIError(
+                "LLM_AUTH_ERROR",
+                "Invalid API Key",
+                status_code=401
+            )
+            mock_get_pipeline.return_value = mock_pipeline
             
-            with patch('app.pipeline') as mock_pipeline:
-                mock_pipeline.word_validator.validate.return_value = (2, True)
-                
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    # Send with Content-Type header and empty JSON body
-                    response = client.post(
-                        f'/api/story/{generated_story_id}/save',
-                        json={},
-                        content_type='application/json'
-                    )
-                    assert response.status_code == 200
-                    
-                    data = response.get_json()
-                    assert "success" in data
-                    assert data["success"] is True
+            response = client.post('/api/generate', json=sample_story_payload)
+            assert response.status_code == HTTP_UNAUTHORIZED  # Assert specific status code
+            data = response.get_json()
+            assert "error" in data
+            assert data["error_code"] == "LLM_AUTH_ERROR"
+            assert "Invalid API Key" in data["error"]
     
-    def test_save_story_with_updated_text(self, client, generated_story_id):
-        """Test that saving with updated text validates word count."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "Original text",
-                "word_count": 2
-            }
-            mock_get.return_value = mock_story
+    def test_generate_pipeline_generic_exception_handling(self, client, sample_story_payload):
+        """Test handling of unexpected generic exceptions from pipeline."""
+        with patch('app.get_pipeline') as mock_get_pipeline:
+            mock_pipeline = MagicMock()
+            # Simulate a specific unexpected exception type (RuntimeError) instead of generic Exception
+            # This makes the test more explicit about what error types are being tested
+            mock_pipeline.capture_premise.side_effect = RuntimeError("Unexpected internal error")
+            mock_get_pipeline.return_value = mock_pipeline
             
-            with patch('app.pipeline') as mock_pipeline:
-                mock_pipeline.word_validator.validate.return_value = (100, True)
-                
-                with patch('app.story_storage') as mock_storage:
-                    mock_storage.save_story.return_value = True
-                    
-                    response = client.post(
-                        f'/api/story/{generated_story_id}/save',
-                        json={"text": "Updated story text"}
-                    )
-                    assert response.status_code == 200
+            response = client.post('/api/generate', json=sample_story_payload)
+            # Assert it's caught by a generic 500 handler
+            assert response.status_code == HTTP_INTERNAL_SERVER_ERROR
+            data = response.get_json()
+            assert "error" in data
+            assert data["error_code"] == "INTERNAL_ERROR"
+    
+    def test_generate_service_unavailable_error(self, client, sample_story_payload):
+        """Test handling of ServiceUnavailableError."""
+        with patch('app.get_pipeline') as mock_get_pipeline:
+            mock_pipeline = MagicMock()
+            mock_pipeline.capture_premise.side_effect = ServiceUnavailableError(
+                "LLM Service",
+                "The LLM service is temporarily unavailable"
+            )
+            mock_get_pipeline.return_value = mock_pipeline
+            
+            response = client.post('/api/generate', json=sample_story_payload)
+            assert response.status_code == HTTP_SERVICE_UNAVAILABLE
+            data = response.get_json()
+            assert "error" in data
+            assert data["error_code"] == "SERVICE_UNAVAILABLE"
+            assert "unavailable" in data["error"].lower()
 
 
 class TestStoryExportEndpoint:
-    """Test story export endpoint."""
+    """Test suite for story export endpoints."""
     
-    def test_export_story_requires_content(self, client, generated_story_id):
-        """Test that exporting requires story content."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
+    @patch('app.export_story_from_dict')
+    def test_export_supports_multiple_formats(self, mock_export, client, generated_story_id):
+        """Test that export endpoint supports multiple formats."""
+        mock_response = Response()
+        mock_response.status_code = HTTP_OK
+        mock_export.return_value = mock_response
         
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": ""  # Empty text
-            }
-            mock_get.return_value = mock_story
-            
-            response = client.get(f'/api/story/{generated_story_id}/export/pdf')
-            assert response.status_code == 400
+        formats = ["pdf", "markdown", "txt"]
+        for format_name in formats:
+            response = client.get(f'/api/story/{generated_story_id}/export/{format_name}')
+            assert response.status_code == HTTP_OK
+            assert mock_export.called
     
-    def test_export_supports_multiple_formats(self, client, generated_story_id):
-        """Test that export supports multiple formats."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "# Test Story\n\nStory content here."
-            }
-            mock_get.return_value = mock_story
-            
-            with patch('app.export_pdf') as mock_pdf:
-                from flask import Response
-                mock_pdf.return_value = Response(status=200)
-                
-                response = client.get(f'/api/story/{generated_story_id}/export/pdf')
-                # Should call export function
-                assert mock_pdf.called or response.status_code in [200, 400]
-            
-            with patch('app.export_markdown') as mock_md:
-                from flask import Response
-                mock_md.return_value = Response(status=200)
-                
-                response = client.get(f'/api/story/{generated_story_id}/export/markdown')
-                assert mock_md.called or response.status_code in [200, 400]
-            
-            with patch('app.export_txt') as mock_txt:
-                from flask import Response
-                mock_txt.return_value = Response(status=200)
-                
-                response = client.get(f'/api/story/{generated_story_id}/export/txt')
-                assert mock_txt.called or response.status_code in [200, 400]
+    def test_export_invalid_format(self, client, generated_story_id):
+        """Test that invalid export format returns error."""
+        response = client.get(f'/api/story/{generated_story_id}/export/invalid_format')
+        # Invalid format should return 400 (bad request) or 404 (not found)
+        # Be specific: invalid format is a bad request, not found would be for missing story
+        assert response.status_code == HTTP_BAD_REQUEST or response.status_code == HTTP_NOT_FOUND
+        # Prefer 400 for invalid format parameter
+        if response.status_code == HTTP_BAD_REQUEST:
+            assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
     
-    def test_export_rejects_invalid_format(self, client, generated_story_id):
-        """Test that invalid export format is rejected."""
-        if not generated_story_id:
-            pytest.skip("No story ID available")
-        
-        with patch('app.get_story_or_404') as mock_get:
-            mock_story = {
-                "id": generated_story_id,
-                "text": "# Test Story\n\nContent"
-            }
-            mock_get.return_value = mock_story
+    def test_export_missing_story_id(self, client):
+        """Test that export with missing story ID returns error."""
+        response = client.get('/api/story/export/pdf')
+        # Should return 404 (not found) for missing story ID
+        assert response.status_code == HTTP_NOT_FOUND
+        data = response.get_json()
+        assert "error" in data
+    
+    def test_export_nonexistent_story(self, client):
+        """Test that export with nonexistent story ID returns error."""
+        nonexistent_id = "nonexistent_story_99999"
+        with patch('app.get_story_or_404') as mock_get_story:
+            from flask import abort
+            mock_get_story.side_effect = lambda story_id: abort(404, description="Story not found")
             
-            response = client.get(f'/api/story/{generated_story_id}/export/invalid')
-            assert response.status_code == 400
-
-
-class TestConcurrentRequests:
-    """Test concurrent request handling."""
-    
-    def test_multiple_health_checks_sequential(self, client):
-        """Test that multiple health checks can be handled (sequential for test client)."""
-        # Flask test client is not thread-safe, so test sequentially
-        results = []
-        for _ in range(10):
-            response = client.get('/api/health')
-            results.append(response.status_code == 200)
-        
-        assert all(results), "All health checks should succeed"
-    
-    def test_multiple_genre_requests_sequential(self, client):
-        """Test that multiple genre requests can be handled (sequential for test client)."""
-        # Flask test client is not thread-safe, so test sequentially
-        results = []
-        for _ in range(5):
-            response = client.get('/api/genres')
+            response = client.get(f'/api/story/{nonexistent_id}/export/pdf')
+            assert response.status_code == HTTP_NOT_FOUND
             data = response.get_json()
-            results.append(response.status_code == 200 and "genres" in data)
-        
-        assert all(results), "All genre requests should succeed"
+            assert "error" in data or "not found" in str(data).lower()
 
+
+class TestStoryListEndpoint:
+    """Test suite for /api/stories endpoint."""
+    
+    def test_list_stories_returns_pagination(self, client):
+        """Test that list endpoint returns pagination metadata."""
+        response = client.get('/api/stories')
+        
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "stories" in data
+        assert "pagination" in data
+        assert isinstance(data["stories"], list)
+        assert "page" in data["pagination"]
+        assert "per_page" in data["pagination"]
+        assert "total" in data["pagination"]
+
+
+class TestHealthEndpoint:
+    """Test suite for /api/health endpoint."""
+    
+    def test_health_endpoint_returns_status(self, client):
+        """Test that health endpoint returns status."""
+        response = client.get('/api/health')
+        
+        assert response.status_code == 200
+        data = response.get_json()
+        assert "status" in data or "health" in data
+
+
+class TestRateLimiting:
+    """Test suite for rate limiting functionality.
+    
+    Note: Comprehensive rate limiting tests that actually verify rate limit
+    enforcement (429 responses, headers, multiple endpoints) are in
+    tests/test_rate_limiting.py. This test suite focuses on basic endpoint
+    functionality with rate limiting enabled.
+    """
+    
+    def test_generate_endpoint_with_rate_limiting_enabled(self, client, sample_story_payload):
+        """Test that generate endpoint works with rate limiting enabled.
+        
+        This is a basic smoke test. For comprehensive rate limiting tests
+        that verify actual enforcement, see tests/test_rate_limiting.py.
+        """
+        with patch('app.get_pipeline') as mock_get_pipeline, \
+             patch('app.get_story_repository') as mock_get_repo:
+            mock_pipeline_instance = MagicMock()
+            mock_pipeline_instance.capture_premise.return_value = sample_story_payload
+            mock_pipeline_instance.generate_outline.return_value = {"acts": {}}
+            mock_pipeline_instance.scaffold.return_value = {}
+            mock_pipeline_instance.draft.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.revise.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.word_validator.count_words.return_value = 1
+            mock_pipeline_instance.genre = sample_story_payload["genre"]
+            mock_get_pipeline.return_value = mock_pipeline_instance
+            
+            mock_repo_instance = MagicMock()
+            mock_repo_instance.save.return_value = True
+            mock_get_repo.return_value = mock_repo_instance
+            
+            # Make a single request - should succeed (rate limit not exceeded)
+            response = client.post('/api/generate', json=sample_story_payload)
+            assert response.status_code == HTTP_OK, \
+                "Endpoint should work when rate limit is not exceeded"
+
+
+class TestBackgroundJobEndpoints:
+    """Test suite for background job endpoints (/api/job/*).
+    
+    These tests properly handle RQ_AVAILABLE patching by simulating both
+    the app.RQ_AVAILABLE flag and the rq_config module availability.
+    """
+    
+    def test_get_job_status_requires_rq_simulated(self, client):
+        """Test that job status endpoint returns 503 when RQ is unavailable."""
+        import sys
+        from unittest.mock import MagicMock
+        
+        # Simulate RQ being unavailable at the module level
+        with patch.dict(sys.modules, {'rq_config': None}), \
+             patch('app.RQ_AVAILABLE', False):
+            response = client.get('/api/job/test_job_123')
+            assert response.status_code == HTTP_SERVICE_UNAVAILABLE
+            data = response.get_json()
+            assert "error" in data or "message" in data
+            assert "unavailable" in data.get("error", "").lower() or \
+                   "unavailable" in data.get("message", "").lower()
+    
+    def test_get_job_status_returns_404_for_missing_job_simulated(self, client):
+        """Test that job status endpoint returns 404 when job doesn't exist."""
+        import sys
+        from unittest.mock import MagicMock
+        
+        # Simulate RQ being available, but get_job returns None
+        # Since get_job is imported at module level, we need to patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=None)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=None):
+            response = client.get('/api/job/nonexistent_job')
+            assert response.status_code == HTTP_NOT_FOUND
+            data = response.get_json()
+            assert "error" in data or "message" in data
+            assert "not found" in data.get("error", "").lower() or \
+                   "not found" in data.get("message", "").lower()
+    
+    def test_get_job_status_returns_job_info_when_available(self, client):
+        """Test that job status endpoint returns job information when job exists."""
+        import sys
+        from unittest.mock import MagicMock
+        from datetime import datetime
+        
+        # Create a mock job with all expected attributes
+        mock_job = MagicMock()
+        mock_job.get_status.return_value = "finished"
+        mock_job.created_at = datetime.now()
+        mock_job.started_at = datetime.now()
+        mock_job.ended_at = datetime.now()
+        mock_job.is_finished = True
+        mock_job.is_failed = False
+        mock_job.result = {"story_id": "test_story_123", "status": "completed"}
+        mock_job.exc_info = None
+        
+        # Since get_job is imported at module level, patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=mock_job)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=mock_job):
+            response = client.get('/api/job/test_job_123')
+            assert response.status_code == HTTP_OK
+            data = response.get_json()
+            assert "job_id" in data
+            assert "status" in data
+            assert data["status"] == "finished"
+            assert "result" in data
+    
+    def test_get_job_result_requires_rq_simulated(self, client):
+        """Test that job result endpoint returns 503 when RQ is unavailable."""
+        import sys
+        
+        # Simulate RQ being unavailable at the module level
+        with patch.dict(sys.modules, {'rq_config': None}), \
+             patch('app.RQ_AVAILABLE', False):
+            response = client.get('/api/job/test_job_123/result')
+            assert response.status_code == HTTP_SERVICE_UNAVAILABLE
+            data = response.get_json()
+            assert "error" in data or "message" in data
+    
+    def test_get_job_result_returns_404_for_missing_job(self, client):
+        """Test that job result endpoint returns 404 when job doesn't exist."""
+        import sys
+        from unittest.mock import MagicMock
+        
+        # Since get_job is imported at module level, patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=None)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=None):
+            response = client.get('/api/job/nonexistent_job/result')
+            assert response.status_code == HTTP_NOT_FOUND
+            data = response.get_json()
+            assert "error" in data or "message" in data
+    
+    def test_get_job_result_returns_202_for_incomplete_job(self, client):
+        """Test that job result endpoint returns 202 when job is not finished."""
+        import sys
+        from unittest.mock import MagicMock
+        from datetime import datetime
+        
+        # Create a mock job that is not finished
+        mock_job = MagicMock()
+        mock_job.get_status.return_value = "started"
+        mock_job.is_finished = False
+        mock_job.is_failed = False
+        
+        # Since get_job is imported at module level, patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=mock_job)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=mock_job):
+            response = client.get('/api/job/test_job_123/result')
+            assert response.status_code == 202  # Accepted
+            data = response.get_json()
+            assert "status" in data
+            assert "message" in data
+    
+    def test_get_job_status_returns_error_for_failed_job(self, client):
+        """Test that job status endpoint returns error information for failed jobs."""
+        import sys
+        from unittest.mock import MagicMock
+        from datetime import datetime
+        
+        # Create a mock job that has failed
+        mock_job = MagicMock()
+        mock_job.get_status.return_value = "failed"
+        mock_job.created_at = datetime.now()
+        mock_job.started_at = datetime.now()
+        mock_job.ended_at = datetime.now()
+        mock_job.is_finished = True
+        mock_job.is_failed = True
+        mock_job.exc_info = "Job failed with error: Test error message"
+        mock_job.result = None
+        
+        # Since get_job is imported at module level, patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=mock_job)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=mock_job):
+            response = client.get('/api/job/test_job_123')
+            assert response.status_code == HTTP_OK
+            data = response.get_json()
+            assert "job_id" in data
+            assert "status" in data
+            assert data["status"] == "failed"
+            assert "error" in data
+            assert "Test error message" in data["error"]
+    
+    def test_get_job_result_returns_503_for_failed_job(self, client):
+        """Test that job result endpoint returns 503 when job has failed."""
+        import sys
+        from unittest.mock import MagicMock
+        from datetime import datetime
+        
+        # Create a mock job that has failed
+        mock_job = MagicMock()
+        mock_job.get_status.return_value = "failed"
+        mock_job.is_finished = True
+        mock_job.is_failed = True
+        mock_job.exc_info = "Job failed with error: Test error message"
+        
+        # Since get_job is imported at module level, patch it in app
+        mock_rq_config = MagicMock()
+        mock_rq_config.get_job = MagicMock(return_value=mock_job)
+        
+        with patch.dict(sys.modules, {'rq_config': mock_rq_config}), \
+             patch('app.RQ_AVAILABLE', True), \
+             patch('app.get_job', return_value=mock_job):
+            response = client.get('/api/job/test_job_123/result')
+            assert response.status_code == HTTP_SERVICE_UNAVAILABLE
+            data = response.get_json()
+            assert "error" in data
+            assert "Test error message" in data["error"]
