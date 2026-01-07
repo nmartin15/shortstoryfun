@@ -288,6 +288,31 @@ class TestStoryExportEndpoint:
             assert response.status_code == HTTP_NOT_FOUND
             data = response.get_json()
             assert "error" in data or "not found" in str(data).lower()
+    
+    def test_export_with_invalid_story_id_format(self, client):
+        """Test that export with invalid story ID format returns error.
+        
+        This test ensures the endpoint properly handles invalid story ID formats,
+        not just missing or nonexistent IDs. This addresses the concern that tests
+        might mask issues by always using a valid generated_story_id.
+        """
+        # Test with various invalid ID formats
+        invalid_ids = [
+            "",  # Empty string
+            "invalid",  # Invalid format
+            "123",  # Too short
+            None,  # None value (if passed as query param)
+        ]
+        
+        for invalid_id in invalid_ids:
+            if invalid_id is None:
+                # Skip None as it can't be in URL path
+                continue
+            response = client.get(f'/api/story/{invalid_id}/export/pdf')
+            # Should return 404 for invalid format or missing story
+            assert response.status_code in [HTTP_NOT_FOUND, HTTP_BAD_REQUEST]
+            data = response.get_json()
+            assert "error" in data
 
 
 class TestStoryListEndpoint:
@@ -361,14 +386,26 @@ class TestBackgroundJobEndpoints:
     
     These tests properly handle RQ_AVAILABLE patching by simulating both
     the app.RQ_AVAILABLE flag and the rq_config module availability.
+    
+    The tests ensure complete isolation by:
+    1. Patching sys.modules to simulate rq_config import failure
+    2. Patching app.RQ_AVAILABLE to control the flag
+    3. Patching app.get_job to handle module-level imports
+    This comprehensive patching ensures tests work regardless of whether
+    rq_config is actually available in the test environment.
     """
     
     def test_get_job_status_requires_rq_simulated(self, client):
-        """Test that job status endpoint returns 503 when RQ is unavailable."""
+        """Test that job status endpoint returns 503 when RQ is unavailable.
+        
+        This test simulates the scenario where rq_config cannot be imported,
+        ensuring the endpoint gracefully handles RQ unavailability.
+        """
         import sys
         from unittest.mock import MagicMock
         
         # Simulate RQ being unavailable at the module level
+        # This covers the case where rq_config import fails
         with patch.dict(sys.modules, {'rq_config': None}), \
              patch('app.RQ_AVAILABLE', False):
             response = client.get('/api/job/test_job_123')
@@ -379,12 +416,17 @@ class TestBackgroundJobEndpoints:
                    "unavailable" in data.get("message", "").lower()
     
     def test_get_job_status_returns_404_for_missing_job_simulated(self, client):
-        """Test that job status endpoint returns 404 when job doesn't exist."""
+        """Test that job status endpoint returns 404 when job doesn't exist.
+        
+        This test simulates RQ being available but the job not existing,
+        ensuring proper error handling for missing jobs.
+        """
         import sys
         from unittest.mock import MagicMock
         
         # Simulate RQ being available, but get_job returns None
-        # Since get_job is imported at module level, we need to patch it in app
+        # Since get_job is imported at module level in app.py, we need to patch it in app
+        # We also patch sys.modules to ensure rq_config is available for import simulation
         mock_rq_config = MagicMock()
         mock_rq_config.get_job = MagicMock(return_value=None)
         
