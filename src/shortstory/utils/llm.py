@@ -23,8 +23,8 @@ from .llm_constants import (
 
 # Lazy imports for backward compatibility (avoid circular imports)
 if TYPE_CHECKING:
-    from ..providers.factory import get_default_provider
-    from ..providers.gemini import GeminiProvider
+    from ..providers.factory import get_default_provider  # noqa: F401
+    from ..providers.gemini import GeminiProvider  # noqa: F401
 
 # Initialize logger at module level
 logger = logging.getLogger(__name__)
