@@ -1,5 +1,19 @@
 """Flask web app for Short Story Pipeline."""
 
+# Fix for Python 3.9 compatibility: patch importlib.metadata with backport
+# This is needed because some dependencies require packages_distributions
+# which is only available in Python 3.10+ stdlib, but available in importlib_metadata backport
+try:
+    import importlib_metadata
+    import importlib.metadata as stdlib_metadata
+    # Patch stdlib with backport if needed
+    if not hasattr(stdlib_metadata, 'packages_distributions'):
+        if hasattr(importlib_metadata, 'packages_distributions'):
+            stdlib_metadata.packages_distributions = importlib_metadata.packages_distributions
+except Exception:
+    # If patching fails, continue anyway - some features may not work
+    pass
+
 # Load environment variables from .env file before other imports
 from dotenv import load_dotenv  # type: ignore[import-untyped]
 
@@ -9,7 +23,12 @@ import os  # noqa: E402
 import uuid  # noqa: E402
 import re  # noqa: E402
 import logging  # noqa: E402
-from typing import Any, Dict, Optional  # noqa: E402
+from typing import Any, Dict, Optional, TYPE_CHECKING  # noqa: E402
+
+if TYPE_CHECKING:
+    from flask_limiter import Limiter  # noqa: F401
+    from src.shortstory.pipeline import ShortStoryPipeline  # noqa: F401
+    from src.shortstory.utils.repository import StoryRepository  # noqa: F401
 from datetime import datetime  # noqa: E402
 from flask import Flask, render_template, request, jsonify, current_app, g  # noqa: E402
 from flask_cors import CORS  # type: ignore[import-untyped]  # noqa: E402
@@ -32,6 +51,7 @@ from src.shortstory.utils.errors import (  # noqa: E402
 from src.shortstory.exports import (  # noqa: E402
     export_story_from_dict
 )  # noqa: E402
+from src.shortstory.utils.llm import get_default_client  # noqa: E402
 
 # Background job support (optional)
 try:
@@ -49,12 +69,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Module-level variables for backward compatibility
-# These will be initialized by create_app() - using Any initially to avoid type errors
-# The actual types are set immediately after create_app() is called
-app: Any = None  # type: ignore[assignment]
-limiter: Any = None  # type: ignore[assignment]
-story_repository: Any = None  # type: ignore[assignment]
+# Module-level variables removed to eliminate circular dependency
+# Access app extensions via current_app.extensions['limiter'] and current_app.extensions['story_repository']
+# within request context, or use get_limiter() and get_story_repository() helper functions
 
 
 def init_stories(repo: Any) -> None:
@@ -88,7 +105,6 @@ def check_llm_setup():
         template-based story generation instead of AI generation.
     """
     try:
-        from src.shortstory.utils import get_default_client
         import os
 
         has_api_key = bool(os.getenv("GOOGLE_API_KEY"))
@@ -174,6 +190,9 @@ def create_app(config=None):
         'LIST_STORIES_RATE_LIMIT', os.getenv(
             'LIST_STORIES_RATE_LIMIT', '60 per hour'))
     flask_app.config.setdefault(
+        'GET_STORY_RATE_LIMIT', os.getenv(
+            'GET_STORY_RATE_LIMIT', '100 per hour'))
+    flask_app.config.setdefault(
         'REVISION_HISTORY_RATE_LIMIT', os.getenv(
             'REVISION_HISTORY_RATE_LIMIT', '60 per hour'))
     flask_app.config.setdefault(
@@ -238,7 +257,7 @@ def create_app(config=None):
 # Module-level variables (limiter, story_repository) are set at the end of the file
 
 
-def word_count_response(word_count, max_words=MAX_WORD_COUNT):
+def word_count_response(word_count: int, max_words: int = MAX_WORD_COUNT) -> Dict[str, Any]:
     """
     Build standardized word count response.
 
@@ -528,7 +547,7 @@ def get_story_text(story: Dict[str, Any]) -> str:
     return generate_story_text(story)
 
 
-def get_story_repository() -> Any:
+def get_story_repository() -> 'StoryRepository':
     """
     Get the story repository from current_app context.
 
@@ -541,7 +560,7 @@ def get_story_repository() -> Any:
     return current_app.extensions['story_repository']
 
 
-def get_limiter() -> Any:
+def get_limiter() -> 'Limiter':
     """
     Get the rate limiter from current_app context.
 
@@ -554,7 +573,11 @@ def get_limiter() -> Any:
     return current_app.extensions['limiter']
 
 
-def create_pipeline(genre=None, genre_config=None, max_word_count=None):
+def create_pipeline(
+    genre: Optional[str] = None,
+    genre_config: Optional[Dict[str, Any]] = None,
+    max_word_count: Optional[int] = None
+) -> 'ShortStoryPipeline':
     """
     Create a request-scoped pipeline instance.
 
@@ -584,7 +607,7 @@ def create_pipeline(genre=None, genre_config=None, max_word_count=None):
     )
 
 
-def get_pipeline(genre: Optional[str] = None, genre_config: Optional[Dict[str, Any]] = None, max_word_count: Optional[int] = None) -> Any:
+def get_pipeline(genre: Optional[str] = None, genre_config: Optional[Dict[str, Any]] = None, max_word_count: Optional[int] = None) -> 'ShortStoryPipeline':
     """
     Get or create a request-scoped pipeline instance.
 
@@ -618,11 +641,44 @@ def get_pipeline(genre: Optional[str] = None, genre_config: Optional[Dict[str, A
     return g.pipeline
 
 
+def validate_story_id(story_id: str) -> str:
+    """
+    Validate story ID format.
+    
+    Args:
+        story_id: Story ID to validate
+        
+    Returns:
+        Validated story ID
+        
+    Raises:
+        ValidationError: If story ID format is invalid
+    """
+    import re
+    pattern = r'^story_[a-f0-9]{8}$'
+    if not re.match(pattern, story_id):
+        raise ValidationError(
+            f"Invalid story ID format: '{story_id}'. Expected format: 'story_XXXXXXXX' where X is a hexadecimal digit.",
+            details={"field": "story_id", "expected_format": "story_[a-f0-9]{8}"}
+        )
+    return story_id
+
+
 def get_story_or_404(story_id: str) -> Optional[Dict[str, Any]]:
     """
     Get story from repository, or return None.
 
     Uses current_app context to access the story repository.
+    Validates story_id format before querying the database to prevent injection attacks.
+    
+    Args:
+        story_id: Story ID (will be validated)
+        
+    Returns:
+        Story dictionary or None if not found
+        
+    Raises:
+        ValidationError: If story ID format is invalid
     Note: This function does NOT raise 404 errors - it returns None.
     Route handlers should check the return value and raise NotFoundError
     if the story is not found.
@@ -633,6 +689,10 @@ def get_story_or_404(story_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Story data dictionary if found, None otherwise
     """
+    # Validate story_id format to prevent injection attacks
+    # Even though we use parameterized queries, validating format adds defense in depth
+    validate_story_id(story_id)
+    
     repo = get_story_repository()
     return repo.load(story_id)
 
@@ -640,7 +700,7 @@ def get_story_or_404(story_id: str) -> Optional[Dict[str, Any]]:
 # Forward declaration - register_routes is defined later but needs to be
 # available when create_app() is called. This is a workaround for the
 # circular dependency issue.
-def register_routes(flask_app, limiter_instance):
+def register_routes(flask_app: 'Flask', limiter_instance: 'Limiter') -> None:
     """
     Register all application routes.
 
@@ -725,9 +785,56 @@ def register_routes(flask_app, limiter_instance):
                     "Story idea is required. Please provide a creative premise for your story.",
                     details={
                         "field": "idea"})
+            
+            # Validate idea length
+            if len(idea) > 2000:
+                raise ValidationError(
+                    "Story idea is too long (maximum 2000 characters). Please provide a more concise premise.",
+                    details={
+                        "field": "idea",
+                        "length": len(idea),
+                        "max_length": 2000
+                    })
 
+            # Normalize and validate character input
             if isinstance(character, str):
                 character = {"description": character}
+            elif character and not isinstance(character, dict):
+                raise ValidationError(
+                    "Character must be a dictionary or string if provided.",
+                    details={"field": "character", "type": type(character).__name__})
+            
+            # If character is empty dict, treat as None (optional field)
+            if character == {}:
+                character = None
+            
+            # Validate character structure if provided
+            if character:
+                char_desc = character.get("description", "")
+                if char_desc and len(char_desc) > 2000:
+                    raise ValidationError(
+                        "Character description is too long (maximum 2000 characters).",
+                        details={
+                            "field": "character.description",
+                            "length": len(char_desc),
+                            "max_length": 2000
+                        })
+            
+            # Validate theme if provided
+            if theme and len(theme) > 1000:
+                raise ValidationError(
+                    "Theme is too long (maximum 1000 characters).",
+                    details={
+                        "field": "theme",
+                        "length": len(theme),
+                        "max_length": 1000
+                    })
+            
+            # Validate genre if provided
+            if genre and not isinstance(genre, str):
+                raise ValidationError(
+                    "Genre must be a string if provided.",
+                    details={"field": "genre", "type": type(genre).__name__})
 
             # Check if background jobs are enabled and requested
             use_bg_jobs = (
@@ -757,18 +864,21 @@ def register_routes(flask_app, limiter_instance):
                 }), 202  # Accepted
 
             # Synchronous generation (original behavior)
-            genre_config = get_genre_config(genre)
+            # Get request-scoped pipeline instance
+            # get_pipeline will handle fetching genre_config if needed
+            pipeline = get_pipeline(genre=genre)
+            
+            # Get genre_config from pipeline for use in story building
+            # Ensure we have a valid genre_config before proceeding
+            genre_config = pipeline.genre_config
             if genre_config is None:
-                # Fallback to General Fiction if genre not found
-                genre_config = get_genre_config('General Fiction')
-                # Ensure genre_config is not None (should always be
-                # a dict)
+                # Fallback: try to fetch directly if pipeline doesn't have it
+                genre_config = get_genre_config(genre)
                 if genre_config is None:
                     raise ServiceUnavailableError(
-                        "genre_config", "Genre configuration service unavailable")
-
-            # Get request-scoped pipeline instance
-            pipeline = get_pipeline(genre=genre, genre_config=genre_config)
+                        "genre_config", f"Genre configuration service unavailable for genre: {genre}")
+                # Update pipeline with the fetched config
+                pipeline.genre_config = genre_config
 
             premise = pipeline.capture_premise(
                 idea, character, theme, validate=True)
@@ -843,10 +953,33 @@ def register_routes(flask_app, limiter_instance):
 
             # Build standardized story data using story_builder
             # This ensures consistency across all story creation points
+            # Convert Pydantic models to dicts for build_story_data
+            from src.shortstory.models import PremiseModel, OutlineModel
+            # Convert Pydantic models to dicts for storage (handle both v1 and v2)
+            if isinstance(premise, PremiseModel):
+                if hasattr(premise, 'model_dump'):
+                    premise_dict = premise.model_dump(exclude_none=True)
+                else:
+                    premise_dict = premise.dict(exclude_none=True)
+            elif isinstance(premise, dict):
+                premise_dict = premise
+            else:
+                premise_dict = {}
+            
+            if isinstance(outline, OutlineModel):
+                if hasattr(outline, 'model_dump'):
+                    outline_dict = outline.model_dump(exclude_none=True)
+                else:
+                    outline_dict = outline.dict(exclude_none=True)
+            elif isinstance(outline, dict):
+                outline_dict = outline
+            else:
+                outline_dict = {}
+            
             story_data = build_story_data(
                 story_id=story_id,
-                premise=premise,
-                outline=outline,
+                premise=premise_dict,
+                outline=outline_dict,
                 genre=genre,
                 genre_config=genre_config,
                 body=revised_story_text,  # Pure narrative text
@@ -879,20 +1012,39 @@ def register_routes(flask_app, limiter_instance):
                 f"Invalid input: {error_msg}. Please check your story parameters.",
                 details={"original_error": error_msg}
             )
+        except ServiceUnavailableError:
+            # Re-raise service errors to be handled by error handler
+            raise
+        except KeyError as e:
+            error_msg = str(e)
+            logger.error(
+                f"Missing required field during story generation: {error_msg}",
+                exc_info=True)
+            raise ValidationError(
+                f"Missing required field: {error_msg}. Please check your story parameters.",
+                details={"field": error_msg, "original_error": error_msg}
+            )
+        except (ConnectionError, TimeoutError) as e:
+            error_msg = str(e)
+            logger.warning(f"Network error during story generation: {error_msg}")
+            raise ServiceUnavailableError(
+                "network",
+                "Network error occurred. Please check your connection and try again."
+            )
         except Exception as e:
             error_msg = str(e)
-        # Check for common API errors
-        if "api" in error_msg.lower() or "key" in error_msg.lower():
-            logger.warning(f"API error during story generation: {error_msg}")
-            raise ServiceUnavailableError(
-                "ai_generation",
-                "AI generation service error. The app will use template-based generation. Check your API configuration if you expected AI generation."
-            )
-        # Re-raise to be handled by generic error handler
-        logger.error(
-            f"Unexpected error during story generation: {error_msg}",
-            exc_info=True)
-        raise
+            # Check for common API errors
+            if "api" in error_msg.lower() or "key" in error_msg.lower():
+                logger.warning(f"API error during story generation: {error_msg}")
+                raise ServiceUnavailableError(
+                    "ai_generation",
+                    "AI generation service error. The app will use template-based generation. Check your API configuration if you expected AI generation."
+                )
+            # Re-raise to be handled by generic error handler
+            logger.error(
+                f"Unexpected error during story generation: {error_msg}",
+                exc_info=True)
+            raise
 
     @flask_app.route('/api/story/<story_id>', methods=['GET'])
     @limiter_instance.limit(lambda: current_app.config["GET_STORY_RATE_LIMIT"])
@@ -950,14 +1102,38 @@ def register_routes(flask_app, limiter_instance):
         if story is None:
             raise NotFoundError("Story", story_id)
 
-        data = request.get_json()
-        # Support both 'body' (new format) and 'text' (legacy/backward
-        # compatibility)
+        data = request.get_json() or {}
+        
+        # Validate request body structure
+        if not isinstance(data, dict):
+            raise ValidationError(
+                "Request body must be a JSON object.",
+                details={"field": "body", "type": type(data).__name__}
+            )
+        
+        # Support both 'body' (new format) and 'text' (legacy/backward compatibility)
         body_text = data.get('body') or data.get('text', '')
         if not body_text:
             raise ValidationError(
                 "Story body/text is required in the request body.",
                 details={"field": "body"}
+            )
+        
+        # Validate body text type and length
+        if not isinstance(body_text, str):
+            raise ValidationError(
+                "Story body/text must be a string.",
+                details={"field": "body", "type": type(body_text).__name__}
+            )
+        
+        if len(body_text) > MAX_WORD_COUNT * 10:  # Rough estimate: 10 chars per word max
+            raise ValidationError(
+                f"Story body is too long (maximum {MAX_WORD_COUNT * 10:,} characters).",
+                details={
+                    "field": "body",
+                    "length": len(body_text),
+                    "max_length": MAX_WORD_COUNT * 10
+                }
             )
 
         # Get request-scoped pipeline instance for validation
@@ -1038,7 +1214,7 @@ def register_routes(flask_app, limiter_instance):
                 premise=premise
             )
 
-            return jsonify(response)
+        return jsonify(response)
 
     @flask_app.route('/api/memorability/score', methods=['POST'])
     @limiter_instance.limit(lambda: current_app.config["MEMORABILITY_RATE_LIMIT"])
@@ -1149,6 +1325,7 @@ def register_routes(flask_app, limiter_instance):
                 "storage", "Failed to save story. Please try again.")
 
     @flask_app.route('/api/stories', methods=['GET'])
+    @flask_app.route('/api/story/list', methods=['GET'])  # Legacy endpoint for backward compatibility
     @limiter_instance.limit(lambda: current_app.config["LIST_STORIES_RATE_LIMIT"])
     def list_all_stories():
         """
@@ -1163,9 +1340,25 @@ def register_routes(flask_app, limiter_instance):
                 """
         try:
             # Get pagination parameters
+            # Validate and sanitize query parameters
             page = request.args.get('page', 1, type=int)
             per_page = request.args.get('per_page', 50, type=int)
             genre = request.args.get('genre', None, type=str)
+            
+            # Validate pagination parameters to prevent DoS
+            if page < 1:
+                page = 1
+            if per_page < 1 or per_page > 100:  # Limit max per_page to prevent DoS
+                per_page = min(max(per_page, 1), 100)
+            
+            # Validate genre if provided (prevent injection)
+            if genre:
+                # Only allow alphanumeric, spaces, hyphens, and underscores
+                if not re.match(r'^[a-zA-Z0-9\s_-]+$', genre):
+                    raise ValidationError(
+                        f"Invalid genre format: '{genre}'. Genre must contain only alphanumeric characters, spaces, hyphens, and underscores.",
+                        details={"genre": genre}
+                    )
 
             # Validate and limit per_page
             per_page = min(max(1, per_page), 100)  # Between 1 and 100
@@ -1199,6 +1392,13 @@ def register_routes(flask_app, limiter_instance):
         """
         genre = request.args.get('genre')
         if genre:
+            # Validate genre format (prevent injection)
+            # Allow alphanumeric, spaces, hyphens, underscores, forward slashes, and ampersands
+            if not re.match(r'^[a-zA-Z0-9\s_\-/&]+$', genre):
+                raise ValidationError(
+                    f"Invalid genre format: '{genre}'. Genre must contain only alphanumeric characters, spaces, hyphens, underscores, forward slashes, and ampersands.",
+                    details={"genre": genre}
+                )
             templates = get_templates_for_genre(genre)
             return jsonify({
                 "success": True,
@@ -1276,15 +1476,25 @@ def register_routes(flask_app, limiter_instance):
                 "message": "Story revision started in background. Use /api/job/<job_id> to check status."
             }), 202  # Accepted
 
-        # Synchronous revision (original behavior)
+            # Synchronous revision (original behavior)
         try:
             # Get genre and genre_config from story for revision
+            # Prioritize stored genre_config to maintain consistency with original generation
             story_genre = story.get("genre", "General Fiction")
             story_genre_config = story.get("genre_config")
-            if story_genre_config is None:
+            
+            # If genre_config is missing or incomplete, fetch it
+            # This ensures we have a complete config even if the stored one is outdated
+            if story_genre_config is None or not isinstance(story_genre_config, dict):
+                logger.warning(
+                    f"Story {story_id} missing genre_config, fetching fresh config for genre {story_genre}")
                 story_genre_config = get_genre_config(story_genre)
+                if story_genre_config is None:
+                    raise ServiceUnavailableError(
+                        "genre_config", f"Genre configuration unavailable for genre: {story_genre}")
 
-            # Get request-scoped pipeline instance with story's genre
+            # Get request-scoped pipeline instance with story's genre and config
+            # Pass genre_config explicitly to ensure consistency
             pipeline = get_pipeline(
                 genre=story_genre,
                 genre_config=story_genre_config)
@@ -1333,12 +1543,30 @@ def register_routes(flask_app, limiter_instance):
             return jsonify(
                 build_canonical_story_response(
                     story, story_id=story_id))
+        except ValidationError:
+            # Re-raise validation errors to be handled by error handler
+            raise
+        except ValueError as e:
+            error_msg = str(e)
+            logger.warning(f"Invalid input during revision: {error_msg}")
+            raise ValidationError(
+                f"Invalid input: {error_msg}. Please check your story parameters.",
+                details={"original_error": error_msg}
+            )
+        except (ConnectionError, TimeoutError) as e:
+            error_msg = str(e)
+            logger.warning(f"Network error during revision: {error_msg}")
+            raise ServiceUnavailableError(
+                "network",
+                "Network error occurred during revision. Please check your connection and try again."
+            )
         except Exception as e:
+            error_msg = str(e)
             logger.error(
-                f"Revision failed for story {story_id}: {str(e)}",
+                f"Revision failed for story {story_id}: {error_msg}",
                 exc_info=True)
             raise ServiceUnavailableError(
-                "revision", f"Revision failed: {str(e)}")
+                "revision", f"Revision failed: {error_msg}")
 
     @flask_app.route('/api/story/<story_id>/revisions', methods=['GET'])
     @limiter_instance.limit(lambda: current_app.config["REVISION_HISTORY_RATE_LIMIT"])
@@ -1411,8 +1639,20 @@ def register_routes(flask_app, limiter_instance):
                 "Not enough revisions to compare. Need at least 2 versions.", details={
                     "story_id": story_id, "revision_count": len(revision_history)})
 
+        # Validate version parameters (must be positive integers)
         version1 = request.args.get('version1', type=int)
         version2 = request.args.get('version2', type=int)
+        
+        if version1 is not None and version1 < 1:
+            raise ValidationError(
+                f"Invalid version1: {version1}. Version must be a positive integer.",
+                details={"version1": version1}
+            )
+        if version2 is not None and version2 < 1:
+            raise ValidationError(
+                f"Invalid version2: {version2}. Version must be a positive integer.",
+                details={"version2": version2}
+            )
 
         if version1 is None or version2 is None:
             # Default to first and last
@@ -1499,6 +1739,17 @@ def register_routes(flask_app, limiter_instance):
             ServiceUnavailableError: If export fails
             MissingDependencyError: If required export library is missing
         """
+        # Validate story_id format (defense in depth - also done in get_story_or_404)
+        validate_story_id(story_id)
+        
+        # Validate format_type to prevent path traversal or injection
+        valid_formats = ['pdf', 'markdown', 'txt', 'docx', 'epub']
+        if format_type not in valid_formats:
+            raise ValidationError(
+                f"Invalid format '{format_type}'. Supported formats: {', '.join(valid_formats)}",
+                details={"format_type": format_type, "valid_formats": valid_formats}
+            )
+        
         story = get_story_or_404(story_id)
         if story is None:
             raise NotFoundError("Story", story_id)
@@ -1655,17 +1906,11 @@ def register_routes(flask_app, limiter_instance):
                 "job_result", f"Failed to retrieve job result: {str(e)}")
 
 
-# Create app instance for backward compatibility
-# This ensures existing code that imports 'app' directly still works
-# Must be after register_routes is defined (which is above)
-app = create_app()
-
-# Set module-level variables for backward compatibility
-# Routes use these directly, so we maintain them for now
-# These are guaranteed to be set by create_app()
-limiter = app.extensions['limiter']  # type: ignore[assignment]
-story_repository = app.extensions['story_repository']  # type: ignore[assignment]
-
+# No global app instance created at module level to avoid circular dependencies
+# For WSGI servers (gunicorn, etc.), use: gunicorn 'app:create_app()'
+# For direct execution, app is created in __main__ block below
+# For backward compatibility with code that imports 'app' directly,
+# we create it lazily on first access (but this should be avoided in favor of create_app())
 
 if __name__ == '__main__':
     # Production settings
@@ -1673,4 +1918,6 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     host = os.getenv('HOST', '0.0.0.0')
 
+    # Create and run the app instance within the main block
+    app = create_app()
     app.run(debug=debug_mode, host=host, port=port)

@@ -183,6 +183,74 @@ class TestGenerateEndpoint:
             assert response.status_code == HTTP_OK
             data = response.get_json()
             assert "story_id" in data or "id" in data
+    
+    def test_generate_validates_idea_length_limit(self, client):
+        """Test that story idea exceeding 2000 characters is rejected."""
+        payload = {
+            "idea": "A" * 2001,  # 2001 characters - exceeds limit
+            "genre": "General Fiction"
+        }
+        response = client.post('/api/generate', json=payload)
+        
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
+        assert "2000" in data.get("error", "") or "too long" in data.get("error", "").lower()
+        assert "idea" in data.get("error", "").lower() or "premise" in data.get("error", "").lower()
+    
+    def test_generate_accepts_idea_at_limit(self, client, sample_story_payload):
+        """Test that story idea at exactly 2000 characters is accepted."""
+        sample_story_payload["idea"] = "A" * 2000  # Exactly 2000 characters
+        
+        with patch('app.get_pipeline') as mock_get_pipeline, \
+             patch('app.get_story_repository') as mock_get_repo:
+            mock_pipeline_instance = MagicMock()
+            mock_pipeline_instance.capture_premise.return_value = sample_story_payload
+            mock_pipeline_instance.generate_outline.return_value = {"acts": {}}
+            mock_pipeline_instance.scaffold.return_value = {}
+            mock_pipeline_instance.draft.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.revise.return_value = {"text": "story", "word_count": 1}
+            mock_pipeline_instance.word_validator.count_words.return_value = 1
+            mock_pipeline_instance.genre_config = {"genre": "General Fiction"}
+            mock_get_pipeline.return_value = mock_pipeline_instance
+            
+            mock_repo_instance = MagicMock()
+            mock_repo_instance.save.return_value = True
+            mock_get_repo.return_value = mock_repo_instance
+            
+            response = client.post('/api/generate', json=sample_story_payload)
+            # Should succeed at the limit
+            assert response.status_code == HTTP_OK
+    
+    def test_generate_validates_character_description_length_limit(self, client):
+        """Test that character description exceeding 2000 characters is rejected."""
+        payload = {
+            "idea": "A test story idea",
+            "character": {"description": "A" * 2001},  # 2001 characters - exceeds limit
+            "genre": "General Fiction"
+        }
+        response = client.post('/api/generate', json=payload)
+        
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
+        assert "2000" in data.get("error", "") or "too long" in data.get("error", "").lower()
+        assert "character" in data.get("error", "").lower()
+    
+    def test_generate_validates_theme_length_limit(self, client):
+        """Test that theme exceeding 1000 characters is rejected."""
+        payload = {
+            "idea": "A test story idea",
+            "theme": "A" * 1001,  # 1001 characters - exceeds limit
+            "genre": "General Fiction"
+        }
+        response = client.post('/api/generate', json=payload)
+        
+        assert response.status_code == HTTP_BAD_REQUEST
+        data = response.get_json()
+        assert "error" in data
+        assert "1000" in data.get("error", "") or "too long" in data.get("error", "").lower()
+        assert "theme" in data.get("error", "").lower()
 
 
 class TestGenerateEndpointMockedPipeline:

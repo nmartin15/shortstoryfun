@@ -1,10 +1,12 @@
 # Storage Migration Guide
 
-This document describes the migration from in-memory storage to database-backed storage.
+> **See [STORAGE_IMPLEMENTATION.md](STORAGE_IMPLEMENTATION.md) for complete storage implementation details.**
+
+This document describes the migration from file-based storage to database-backed storage.
 
 ## Overview
 
-The application has been updated to support database-backed storage using SQLite, with optional Redis caching. This provides better scalability and performance compared to the previous in-memory storage approach.
+The application supports database-backed storage using SQLite, with optional Redis caching. This provides better scalability and performance compared to file-based storage.
 
 ## Benefits
 
@@ -16,7 +18,9 @@ The application has been updated to support database-backed storage using SQLite
 
 ## Configuration
 
-### Environment Variables
+For complete configuration details, see **[STORAGE_IMPLEMENTATION.md](STORAGE_IMPLEMENTATION.md)**.
+
+**Quick Setup:**
 
 Add these to your `.env` file:
 
@@ -28,21 +32,10 @@ USE_DB_STORAGE=true
 USE_REDIS_CACHE=false  # Set to true if you have Redis available
 ```
 
-### Storage Backends
-
-1. **Database Storage (Recommended)**: Uses SQLite for persistence
-   - Database file: `data/stories.db`
-   - Automatically created on first use
-   - No additional setup required
-
-2. **Redis Caching (Optional)**: Adds a caching layer on top of database storage
-   - Requires Redis server
-   - Set `USE_REDIS_CACHE=true` and configure `REDIS_URL`
-   - Caches frequently accessed stories for faster retrieval
-
-3. **Legacy Mode**: In-memory storage (for backward compatibility)
-   - Set `USE_DB_STORAGE=false`
-   - Not recommended for production
+**Storage Backends:**
+- **Database Storage (Recommended)**: SQLite at `data/stories.db` (automatically created)
+- **File Storage (Legacy)**: JSON files in `stories/` directory
+- **Redis Caching (Optional)**: Caching layer on top of database storage
 
 ## Migration
 

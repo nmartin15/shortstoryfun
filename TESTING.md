@@ -49,6 +49,9 @@ pytest tests/test_validation.py -v
 
 # Word count tests
 pytest tests/test_word_count.py -v
+
+# Schema validation tests (validates generated content structure)
+pytest tests/test_story_schema_validation.py -v
 ```
 
 ### Run Tests by Category
@@ -67,7 +70,7 @@ pytest tests/ -v -m "integration"
 - **Target Coverage**: 85%+ for unit tests
 - **Priority Areas**: Database storage, LLM utilities, genres, exports
 
-See [TEST_COVERAGE_IMPROVEMENTS.md](TEST_COVERAGE_IMPROVEMENTS.md) for detailed coverage improvement plans.
+For detailed coverage improvement plans and test enhancement recommendations, see **[TEST_COVERAGE_IMPROVEMENTS.md](TEST_COVERAGE_IMPROVEMENTS.md)**.
 
 ## Quick Test Options
 
@@ -183,6 +186,7 @@ The pipeline will automatically fall back to template-based generation, so you'l
 - **`tests/test_word_count.py`**: Word counting functionality tests
 - **`tests/test_outline_scaffold.py`**: Outline and scaffold generation tests
 - **`tests/test_template_draft.py`**: Template-based draft generation tests
+- **`tests/test_story_schema_validation.py`**: Schema validation tests using Pydantic models (StoryModel, PremiseModel, OutlineModel) to validate generated content structure (14 tests)
 
 ### New Test Suites (Priority 1 & 2)
 

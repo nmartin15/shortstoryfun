@@ -24,6 +24,7 @@ This guide covers deploying the Short Story Pipeline application to production.
    FLASK_DEBUG=False
    GOOGLE_API_KEY=your_api_key_here
    REDIS_URL=redis://localhost:6379/0  # Optional but recommended
+   CORS_ALLOWED_ORIGINS=https://yourdomain.com  # Required if using a frontend
    ```
 
 ### 2. Install Dependencies
@@ -187,6 +188,7 @@ docker run -p 5000:5000 --env-file .env shortstory
 | `REDIS_URL` | Redis connection URL | `memory://` | No |
 | `HOST` | Server host | `0.0.0.0` | No |
 | `PORT` | Server port | `5000` | No |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated list of allowed origins for CORS | (empty - no CORS) | No (required if using frontend) |
 
 ### Rate Limiting
 
@@ -200,6 +202,32 @@ For production with multiple workers, use Redis:
 ```bash
 REDIS_URL=redis://localhost:6379/0
 ```
+
+### CORS Configuration
+
+CORS (Cross-Origin Resource Sharing) is configured to only allow requests from specified origins to `/api/*` routes. This provides better security by restricting cross-origin access to API endpoints only.
+
+**Configuration:**
+- Set `CORS_ALLOWED_ORIGINS` in your `.env` file with a comma-separated list of allowed origins
+- If not set, CORS is disabled (no cross-origin requests allowed)
+- CORS only applies to `/api/*` routes, not the entire application
+
+**Examples:**
+```bash
+# Single origin
+CORS_ALLOWED_ORIGINS=https://yourdomain.com
+
+# Multiple origins (development + production)
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
+
+# Multiple production domains
+CORS_ALLOWED_ORIGINS=https://app.yourdomain.com,https://www.yourdomain.com
+```
+
+**Security Notes:**
+- Never use `*` (wildcard) in production - always specify exact origins
+- Use HTTPS origins in production
+- Only include origins you trust and control
 
 ### Gunicorn Configuration
 
@@ -247,7 +275,7 @@ Consider adding:
 - [ ] Configure firewall rules
 - [ ] Use Redis for rate limiting (not in-memory)
 - [ ] Regularly update dependencies
-- [ ] Review and restrict CORS settings if needed
+- [ ] Configure `CORS_ALLOWED_ORIGINS` if deploying a frontend (CORS is restricted to `/api/*` routes only)
 - [ ] Set appropriate file permissions
 
 ## Troubleshooting
@@ -277,20 +305,40 @@ timeout = 300  # 5 minutes
 **Solution:** 
 - Reduce number of workers
 - Implement story cleanup/archival
-- Use external storage for stories
+- Ensure database storage is enabled (`USE_DB_STORAGE=true`) - this is the default
+- Enable Redis caching (`USE_REDIS_CACHE=true`) to reduce database load
+
+## Storage Configuration
+
+The application supports two storage backends. For detailed information about storage implementation, configuration, and migration, see **[STORAGE_IMPLEMENTATION.md](STORAGE_IMPLEMENTATION.md)**.
+
+**Quick Configuration:**
+```bash
+USE_DB_STORAGE=true  # Use database storage (default, recommended for production)
+USE_REDIS_CACHE=false  # Optional: Enable Redis caching for stories
+```
+
+**Database Location:** `data/stories.db`
+
+**Note:** Database storage is enabled by default and recommended for production. File storage (`USE_DB_STORAGE=false`) is suitable for development but not recommended for production with large numbers of stories.
 
 ## Backup and Recovery
 
-Stories are stored in the `stories/` directory. For production:
+For detailed backup and recovery procedures, see **[STORAGE_IMPLEMENTATION.md](STORAGE_IMPLEMENTATION.md)**.
 
-1. **Regular backups:**
-   ```bash
-   tar -czf stories-backup-$(date +%Y%m%d).tar.gz stories/
-   ```
+**Quick Backup Commands:**
 
-2. **Automated backups:** Set up cron job or use cloud storage sync
+**Database Storage:**
+```bash
+# Backup SQLite database
+cp data/stories.db data/stories-backup-$(date +%Y%m%d).db
+```
 
-3. **Database migration:** Consider migrating to a database (PostgreSQL, MongoDB) for better scalability
+**File Storage:**
+```bash
+# Backup stories directory
+tar -czf stories-backup-$(date +%Y%m%d).tar.gz stories/
+```
 
 ## Scaling
 
@@ -298,8 +346,8 @@ For high traffic:
 
 1. **Horizontal scaling:** Deploy multiple instances behind a load balancer
 2. **Use Redis:** Required for shared rate limiting across instances
-3. **Database:** Migrate from file storage to database
-4. **Caching:** Add caching layer for frequently accessed stories
+3. **Database storage:** Already enabled by default (`USE_DB_STORAGE=true`)
+4. **Redis caching:** Enable with `USE_REDIS_CACHE=true` for frequently accessed stories
 5. **CDN:** Use CDN for static assets
 
 ## Support

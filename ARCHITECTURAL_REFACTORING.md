@@ -1,5 +1,8 @@
 # Architectural Refactoring Suggestions
 
+> **See [STORY_MODEL_STANDARDIZATION.md](STORY_MODEL_STANDARDIZATION.md) for story model standardization approach.**  
+> **See [STORAGE_IMPLEMENTATION.md](STORAGE_IMPLEMENTATION.md) for current storage architecture.**
+
 This document outlines architectural improvements that would require **significant refactoring** of the codebase. These are more substantial changes than quick fixes and would impact multiple components.
 
 ## 1. Separation of Concerns in Validation Module

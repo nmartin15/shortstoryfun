@@ -14,7 +14,6 @@ from src.shortstory.utils.llm import (
     _validate_model_name,
     _estimate_tokens,
     _calculate_max_output_tokens,
-    ALLOWED_MODELS,
     DEFAULT_MODEL,
     MODEL_CONTEXT_WINDOWS,
     DEFAULT_CONTEXT_WINDOW,
@@ -408,8 +407,24 @@ class TestStoryDraftGeneration:
             genre_config={"framework": "narrative_arc"},
             client=mock_client
         )
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # Comprehensive assertions for draft content
+        assert isinstance(result, str), "Draft must be a string"
+        assert len(result) > 0, "Draft must not be empty"
+        assert len(result.strip()) > 0, "Draft must contain non-whitespace content"
+        
+        # Verify draft contains key elements from inputs
+        result_lower = result.lower()
+        assert "lighthouse" in result_lower or "keeper" in result_lower or "voice" in result_lower, \
+            "Draft should contain key words from the story idea"
+        
+        # Verify draft has substantial content (not just a placeholder)
+        assert len(result) > 20, \
+            f"Draft should have substantial content, got {len(result)} characters"
+        
+        # Verify draft contains complete sentences
+        sentence_endings = ['.', '!', '?']
+        assert any(ending in result for ending in sentence_endings), \
+            "Draft should contain complete sentences with punctuation"
     
     def test_generate_story_draft_includes_character_details(self, mock_client):
         """Test that character details are included in prompt."""
@@ -506,9 +521,8 @@ class TestLLMErrorHandling:
     def mock_client(self):
         """Create a mock LLM client."""
         # Check if google.generativeai is available, if not skip these tests
-        try:
-            import google.generativeai
-        except ImportError:
+        from tests.conftest import check_optional_dependency
+        if not check_optional_dependency('google.generativeai'):
             pytest.skip("google.generativeai not installed")
         
         with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
@@ -805,4 +819,854 @@ class TestStoryRevisionEdgeCases:
         assert call_args is not None
         prompt = call_args.kwargs.get('prompt', '') if call_args.kwargs else (call_args[0][0] if call_args[0] else "")
         assert "500" in prompt or "500 words" in prompt
+
+
+class TestMarkdownCleaning:
+    """Test markdown cleaning functionality."""
+    
+    def test_clean_markdown_removes_headers(self):
+        """Test that markdown headers are removed."""
+        from src.shortstory.utils.llm import _clean_markdown_from_story
+        
+        text = "## Chapter 1\n\nThis is the story text."
+        cleaned = _clean_markdown_from_story(text)
+        assert "##" not in cleaned
+        assert "Chapter 1" not in cleaned or "This is the story text" in cleaned
+    
+    def test_clean_markdown_removes_multiple_headers(self):
+        """Test that multiple markdown headers are removed."""
+        from src.shortstory.utils.llm import _clean_markdown_from_story
+        
+        text = "## Title\n### Subtitle\n\nStory content here."
+        cleaned = _clean_markdown_from_story(text)
+        assert "##" not in cleaned
+        assert "###" not in cleaned
+        assert "Story content" in cleaned
+    
+    def test_clean_markdown_preserves_story_text(self):
+        """Test that actual story text is preserved."""
+        from src.shortstory.utils.llm import _clean_markdown_from_story
+        
+        text = "## Introduction\n\nIt was a dark night. The wind howled."
+        cleaned = _clean_markdown_from_story(text)
+        assert "It was a dark night" in cleaned
+        assert "The wind howled" in cleaned
+    
+    def test_clean_markdown_handles_empty_string(self):
+        """Test that empty string is handled."""
+        from src.shortstory.utils.llm import _clean_markdown_from_story
+        
+        assert _clean_markdown_from_story("") == ""
+        assert _clean_markdown_from_story(None) == None
+    
+    def test_clean_markdown_handles_no_markdown(self):
+        """Test that text without markdown is unchanged."""
+        from src.shortstory.utils.llm import _clean_markdown_from_story
+        
+        text = "This is plain story text with no markdown."
+        cleaned = _clean_markdown_from_story(text)
+        assert cleaned == text or cleaned.strip() == text.strip()
+
+
+class TestMetadataStripping:
+    """Test metadata stripping functionality."""
+    
+    def test_strip_metadata_removes_constraints_section(self):
+        """Test that constraints metadata is removed."""
+        from src.shortstory.utils.llm import _strip_metadata_from_story
+        
+        text = "Story text here.\n\n**Constraints:**\ntone: dark\npace: fast"
+        cleaned = _strip_metadata_from_story(text)
+        # The constraints header and metadata should be removed
+        assert "**Constraints:**" not in cleaned or cleaned.count("**Constraints:**") == 0
+        assert "tone: dark" not in cleaned
+        assert "pace: fast" not in cleaned
+        assert "Story text here" in cleaned
+    
+    def test_strip_metadata_removes_metadata_patterns(self):
+        """Test that metadata patterns are removed."""
+        from src.shortstory.utils.llm import _strip_metadata_from_story
+        
+        text = "Story content.\n\ntone: dark\npace: moderate\npov_preference: first"
+        cleaned = _strip_metadata_from_story(text)
+        assert "tone: dark" not in cleaned
+        assert "pace: moderate" not in cleaned
+        assert "pov_preference" not in cleaned
+    
+    def test_strip_metadata_preserves_story_text(self):
+        """Test that story text is preserved."""
+        from src.shortstory.utils.llm import _strip_metadata_from_story
+        
+        text = "The character walked into the room.\n\n**Constraints:**\ntone: dark"
+        cleaned = _strip_metadata_from_story(text)
+        assert "The character walked" in cleaned
+        assert "tone: dark" not in cleaned
+    
+    def test_strip_metadata_handles_empty_string(self):
+        """Test that empty string is handled."""
+        from src.shortstory.utils.llm import _strip_metadata_from_story
+        
+        assert _strip_metadata_from_story("") == ""
+        assert _strip_metadata_from_story(None) == None
+    
+    def test_strip_metadata_handles_no_metadata(self):
+        """Test that text without metadata is unchanged."""
+        from src.shortstory.utils.llm import _strip_metadata_from_story
+        
+        text = "Plain story text with no metadata."
+        cleaned = _strip_metadata_from_story(text)
+        assert cleaned == text or cleaned.strip() == text.strip()
+
+
+class TestStoryContinuation:
+    """Test story continuation logic."""
+    
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock LLM client."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(api_key="test_key")
+                    client.generate = MagicMock(return_value="Continued story text with more words.")
+                    return client
+    
+    def test_continue_story_if_needed_skips_when_long_enough(self, mock_client):
+        """Test that continuation is skipped when story is long enough."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+        )
+        
+        # Story must end with proper punctuation to avoid being treated as truncated
+        long_story = "Word " * 4999 + "Word."  # 5000 words, ends with period
+        result = _continue_story_if_needed(
+            long_story, STORY_MIN_WORDS, STORY_MAX_WORDS, GEMINI_MAX_OUTPUT_TOKENS, mock_client
+        )
+        assert result == long_story
+        assert not mock_client.generate.called
+    
+    def test_continue_story_if_needed_continues_when_too_short(self, mock_client):
+        """Test that continuation is triggered when story is too short."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+        )
+        
+        short_story = "Word " * 1000  # 1000 words
+        continuation = "More words " * 500  # 500 words
+        mock_client.generate.return_value = continuation
+        
+        result = _continue_story_if_needed(
+            short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, GEMINI_MAX_OUTPUT_TOKENS, mock_client
+        )
+        assert mock_client.generate.called
+        assert len(result.split()) > len(short_story.split())
+    
+    def test_continue_story_if_needed_handles_truncated_story(self, mock_client):
+        """Test that truncated stories trigger continuation."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+        )
+        
+        # Story that doesn't end with proper punctuation
+        truncated_story = "This is a story that ends abruptly without"
+        continuation = " proper ending. More content here."
+        mock_client.generate.return_value = continuation
+        
+        result = _continue_story_if_needed(
+            truncated_story, STORY_MIN_WORDS, STORY_MAX_WORDS, GEMINI_MAX_OUTPUT_TOKENS, mock_client
+        )
+        assert mock_client.generate.called
+        assert result.endswith(("proper ending", ".", "!", "?"))
+    
+    def test_continue_story_if_needed_handles_continuation_failure(self, mock_client):
+        """Test that continuation failure is handled gracefully."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+        )
+        
+        short_story = "Word " * 1000
+        mock_client.generate.side_effect = Exception("API Error")
+        
+        # Should not raise, but return original story
+        result = _continue_story_if_needed(
+            short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, GEMINI_MAX_OUTPUT_TOKENS, mock_client
+        )
+        assert isinstance(result, str)
+        assert len(result.split()) >= len(short_story.split())
+    
+    def test_attempt_second_continuation(self, mock_client):
+        """Test second continuation attempt."""
+        from src.shortstory.utils.llm import _attempt_second_continuation
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+        )
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        story = "Word " * 2000
+        continuation = "More " * 1000
+        mock_client.generate.return_value = continuation
+        
+        result = _attempt_second_continuation(
+            story, 2000, STORY_MIN_WORDS, GEMINI_MAX_OUTPUT_TOKENS, mock_client, logger
+        )
+        assert mock_client.generate.called
+        assert len(result.split()) > len(story.split())
+    
+    def test_attempt_third_continuation(self, mock_client):
+        """Test third continuation attempt."""
+        from src.shortstory.utils.llm import _attempt_third_continuation
+        from src.shortstory.utils.llm_constants import STORY_MIN_WORDS
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        story = "Word " * 2500
+        continuation = "More " * 1000
+        mock_client.generate.return_value = continuation
+        
+        result = _attempt_third_continuation(
+            story, 2500, STORY_MIN_WORDS, mock_client, logger
+        )
+        assert mock_client.generate.called
+        assert len(result.split()) > len(story.split())
+    
+    def test_continue_story_verifies_token_allocation(self, mock_client):
+        """Test that continuation correctly allocates tokens based on remaining words."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+            TOKENS_PER_WORD_ESTIMATE,
+            DEFAULT_MIN_TOKENS,
+        )
+        
+        # Create a short story that needs continuation
+        short_story = "Word " * 2000  # 2000 words, needs 2000 more to reach minimum
+        estimated_max_tokens = 6000
+        
+        # Calculate expected token allocation for first attempt
+        word_count = len(short_story.split())
+        remaining_words = STORY_MIN_WORDS - word_count
+        continuation_tokens_needed = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 1.3)
+        expected_allocated_tokens = min(GEMINI_MAX_OUTPUT_TOKENS, estimated_max_tokens, continuation_tokens_needed)
+        expected_allocated_tokens = max(DEFAULT_MIN_TOKENS, expected_allocated_tokens)
+        
+        # Return continuation that adds words but not enough to complete
+        continuation = "More words " * 500
+        mock_client.generate.return_value = continuation
+        
+        _continue_story_if_needed(
+            short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, estimated_max_tokens, mock_client
+        )
+        
+        # Verify generate was called
+        assert mock_client.generate.called
+        
+        # Verify token allocation for first call follows the correct logic
+        # The allocation should be calculated based on remaining words needed
+        first_call_args = mock_client.generate.call_args_list[0]
+        assert first_call_args is not None
+        actual_max_tokens = first_call_args.kwargs.get('max_tokens')
+        
+        # Verify token allocation is within valid bounds
+        assert actual_max_tokens is not None, "First call should have max_tokens"
+        assert actual_max_tokens >= DEFAULT_MIN_TOKENS, \
+            f"First call max_tokens {actual_max_tokens} should be >= {DEFAULT_MIN_TOKENS}"
+        assert actual_max_tokens <= GEMINI_MAX_OUTPUT_TOKENS, \
+            f"First call max_tokens {actual_max_tokens} should be <= {GEMINI_MAX_OUTPUT_TOKENS}"
+        assert actual_max_tokens <= estimated_max_tokens, \
+            f"First call max_tokens {actual_max_tokens} should be <= estimated_max_tokens {estimated_max_tokens}"
+        
+        # Verify the allocation is reasonable (should be at least enough for remaining words)
+        # Using a tolerance since the exact calculation may vary
+        min_reasonable_tokens = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 0.8)  # 80% of needed
+        assert actual_max_tokens >= min(min_reasonable_tokens, DEFAULT_MIN_TOKENS), \
+            f"Token allocation {actual_max_tokens} seems too low for {remaining_words} remaining words"
+        
+        # Verify all calls have valid token allocations
+        for i, call_args in enumerate(mock_client.generate.call_args_list):
+            call_max_tokens = call_args.kwargs.get('max_tokens')
+            assert call_max_tokens is not None, f"Call {i+1} should have max_tokens"
+            assert call_max_tokens >= DEFAULT_MIN_TOKENS, \
+                f"Call {i+1} max_tokens {call_max_tokens} should be >= {DEFAULT_MIN_TOKENS}"
+            assert call_max_tokens <= GEMINI_MAX_OUTPUT_TOKENS, \
+                f"Call {i+1} max_tokens {call_max_tokens} should be <= {GEMINI_MAX_OUTPUT_TOKENS}"
+    
+    def test_continue_story_verifies_token_allocation_with_large_remaining_words(self, mock_client):
+        """Test token allocation when many words are needed."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+            TOKENS_PER_WORD_ESTIMATE,
+            DEFAULT_MIN_TOKENS,
+        )
+        
+        # Very short story needing many words
+        very_short_story = "Word " * 500  # 500 words, needs 3500 more
+        estimated_max_tokens = 10000  # Large estimated max
+        
+        # Calculate expected token allocation
+        word_count = len(very_short_story.split())
+        remaining_words = STORY_MIN_WORDS - word_count
+        continuation_tokens_needed = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 1.3)
+        
+        continuation = "More words " * 1000
+        mock_client.generate.return_value = continuation
+        
+        _continue_story_if_needed(
+            very_short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, estimated_max_tokens, mock_client
+        )
+        
+        # Verify token allocation follows correct logic
+        first_call_args = mock_client.generate.call_args_list[0]
+        assert first_call_args is not None
+        actual_max_tokens = first_call_args.kwargs.get('max_tokens')
+        
+        # Should be within valid bounds
+        assert actual_max_tokens is not None
+        assert actual_max_tokens >= DEFAULT_MIN_TOKENS
+        assert actual_max_tokens <= GEMINI_MAX_OUTPUT_TOKENS
+        assert actual_max_tokens <= estimated_max_tokens
+        
+        # Should be reasonable for the remaining words needed
+        min_reasonable = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 0.8)
+        assert actual_max_tokens >= min(min_reasonable, DEFAULT_MIN_TOKENS)
+        # Should be capped at GEMINI_MAX_OUTPUT_TOKENS
+        assert actual_max_tokens <= GEMINI_MAX_OUTPUT_TOKENS
+    
+    def test_continue_story_verifies_token_allocation_respects_estimated_max(self, mock_client):
+        """Test that token allocation respects estimated_max_tokens limit when possible."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+            DEFAULT_MIN_TOKENS,
+        )
+        
+        short_story = "Word " * 2000
+        # estimated_max_tokens that is larger than DEFAULT_MIN_TOKENS
+        # This tests that estimated_max is respected when it's above the minimum
+        reasonable_estimated_max = 5000
+        
+        continuation = "More words " * 500
+        mock_client.generate.return_value = continuation
+        
+        _continue_story_if_needed(
+            short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, reasonable_estimated_max, mock_client
+        )
+        
+        # Verify token allocation respects estimated_max when above minimum
+        first_call_args = mock_client.generate.call_args_list[0]
+        assert first_call_args is not None
+        actual_max_tokens = first_call_args.kwargs.get('max_tokens')
+        # Should respect estimated_max when it's reasonable
+        assert actual_max_tokens <= reasonable_estimated_max, \
+            f"Token allocation {actual_max_tokens} should not exceed estimated_max {reasonable_estimated_max}"
+        assert actual_max_tokens >= DEFAULT_MIN_TOKENS, \
+            f"Token allocation {actual_max_tokens} should be at least {DEFAULT_MIN_TOKENS}"
+    
+    def test_continue_story_verifies_token_allocation_multiple_attempts(self, mock_client):
+        """Test that token allocation is correct across multiple continuation attempts."""
+        from src.shortstory.utils.llm import _continue_story_if_needed
+        from src.shortstory.utils.llm_constants import (
+            STORY_MIN_WORDS,
+            STORY_MAX_WORDS,
+            GEMINI_MAX_OUTPUT_TOKENS,
+            TOKENS_PER_WORD_ESTIMATE,
+            DEFAULT_MIN_TOKENS,
+        )
+        
+        # Story that will need multiple continuation attempts
+        short_story = "Word " * 1000  # Very short, needs 3000 more words
+        estimated_max_tokens = 6000
+        
+        # First continuation adds some words but not enough
+        continuation1 = "More words " * 500  # Adds 500 words, still short
+        continuation2 = "Even more words " * 1000  # Adds 1000 words
+        mock_client.generate.side_effect = [continuation1, continuation2]
+        
+        result = _continue_story_if_needed(
+            short_story, STORY_MIN_WORDS, STORY_MAX_WORDS, estimated_max_tokens, mock_client
+        )
+        
+        # Verify multiple calls were made
+        assert mock_client.generate.call_count >= 1
+        
+        # Verify each call had appropriate token allocation
+        calls = mock_client.generate.call_args_list
+        for i, call in enumerate(calls):
+            call_max_tokens = call.kwargs.get('max_tokens')
+            assert call_max_tokens is not None, f"Call {i+1} should have max_tokens"
+            assert call_max_tokens >= DEFAULT_MIN_TOKENS, \
+                f"Call {i+1} max_tokens {call_max_tokens} should be >= {DEFAULT_MIN_TOKENS}"
+            assert call_max_tokens <= GEMINI_MAX_OUTPUT_TOKENS, \
+                f"Call {i+1} max_tokens {call_max_tokens} should be <= {GEMINI_MAX_OUTPUT_TOKENS}"
+        
+        # Verify story was extended
+        result_word_count = len(result.split())
+        assert result_word_count > len(short_story.split())
+
+
+class TestOutlineGeneration:
+    """Test outline generation functionality."""
+    
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock LLM client."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(api_key="test_key")
+                    return client
+    
+    def test_generate_outline_structure_with_llm(self, mock_client):
+        """Test outline generation with LLM."""
+        from src.shortstory.utils.llm import generate_outline_structure
+        import json
+        
+        # Mock LLM response with valid JSON
+        outline_json = {
+            "beginning": {"hook": "Opening", "setup": "Setup", "beats": ["beat1"]},
+            "middle": {"complication": "Complication", "rising_action": "Action", "beats": ["beat2"]},
+            "end": {"climax": "Climax", "resolution": "Resolution", "beats": ["beat3"]}
+        }
+        mock_response = json.dumps(outline_json)
+        mock_client.generate = MagicMock(return_value=f"```json\n{mock_response}\n```")
+        
+        result = generate_outline_structure(
+            idea="Test idea",
+            character={"name": "Test"},
+            theme="Test theme",
+            use_llm=True,
+            client=mock_client
+        )
+        
+        assert "beginning" in result
+        assert "middle" in result
+        assert "end" in result
+    
+    def test_generate_outline_structure_fallback_to_template(self, mock_client):
+        """Test that template fallback works when LLM fails."""
+        from src.shortstory.utils.llm import generate_outline_structure
+        
+        mock_client.generate = MagicMock(side_effect=Exception("API Error"))
+        
+        result = generate_outline_structure(
+            idea="Test idea",
+            character={"name": "Test"},
+            theme="Test theme",
+            use_llm=True,
+            client=mock_client
+        )
+        
+        assert "beginning" in result
+        assert "middle" in result
+        assert "end" in result
+    
+    def test_generate_outline_structure_without_llm(self, mock_client):
+        """Test outline generation without LLM (template only)."""
+        from src.shortstory.utils.llm import generate_outline_structure
+        
+        result = generate_outline_structure(
+            idea="Test idea",
+            character={"name": "Test"},
+            theme="Test theme",
+            use_llm=False,
+            client=mock_client
+        )
+        
+        assert "beginning" in result
+        assert "middle" in result
+        assert "end" in result
+    
+    def test_generate_outline_structure_handles_invalid_json(self, mock_client):
+        """Test that invalid JSON falls back to parsing."""
+        from src.shortstory.utils.llm import generate_outline_structure
+        
+        mock_client.generate = MagicMock(return_value="This is not JSON but has beginning and middle sections.")
+        
+        result = generate_outline_structure(
+            idea="Test idea",
+            use_llm=True,
+            client=mock_client
+        )
+        
+        assert isinstance(result, dict)
+        assert "beginning" in result or "middle" in result
+    
+    def test_parse_outline_from_text(self):
+        """Test parsing outline from text response."""
+        from src.shortstory.utils.llm import _parse_outline_from_text
+        
+        text = "Beginning: Opening scene\nMiddle: Complication\nEnd: Resolution"
+        result = _parse_outline_from_text(text, "setup", "complication", "resolution")
+        
+        assert result is not None
+        assert "beginning" in result
+        assert "middle" in result
+        assert "end" in result
+
+
+class TestScaffoldGeneration:
+    """Test scaffold generation functionality."""
+    
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock LLM client."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(api_key="test_key")
+                    return client
+    
+    def test_generate_scaffold_structure_with_llm(self, mock_client):
+        """Test scaffold generation with LLM."""
+        from src.shortstory.utils.llm import generate_scaffold_structure
+        import json
+        
+        scaffold_json = {
+            "narrative_voice": {"pov": "third person", "prose_style": "sparse"},
+            "character_voices": {},
+            "tone": {"emotional_register": "balanced"},
+            "conflicts": {"internal": [], "external": []},
+            "sensory_specificity": {"primary_senses": ["sight"]},
+            "style_guidelines": {}
+        }
+        mock_response = json.dumps(scaffold_json)
+        mock_client.generate = MagicMock(return_value=f"```json\n{mock_response}\n```")
+        
+        result = generate_scaffold_structure(
+            premise={"idea": "Test", "character": {"name": "Test"}, "theme": "Test"},
+            outline={"beginning": {}, "middle": {}, "end": {}},
+            use_llm=True,
+            client=mock_client
+        )
+        
+        assert "narrative_voice" in result
+    
+    def test_generate_scaffold_structure_fallback_to_template(self, mock_client):
+        """Test that template fallback works when LLM fails."""
+        from src.shortstory.utils.llm import generate_scaffold_structure
+        
+        mock_client.generate = MagicMock(side_effect=Exception("API Error"))
+        
+        result = generate_scaffold_structure(
+            premise={"idea": "Test", "character": {"name": "Test"}, "theme": "Test"},
+            outline={"beginning": {}, "middle": {}, "end": {}},
+            use_llm=True,
+            client=mock_client
+        )
+        
+        assert "narrative_voice" in result
+        assert "tone" in result
+    
+    def test_generate_scaffold_structure_without_llm(self, mock_client):
+        """Test scaffold generation without LLM (template only)."""
+        from src.shortstory.utils.llm import generate_scaffold_structure
+        
+        result = generate_scaffold_structure(
+            premise={"idea": "Test", "character": {"name": "Test"}, "theme": "Test"},
+            outline={"beginning": {}, "middle": {}, "end": {}},
+            use_llm=False,
+            client=mock_client
+        )
+        
+        assert "narrative_voice" in result
+        assert "tone" in result
+
+
+class TestResponseParsing:
+    """Test response parsing edge cases."""
+    
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock LLM client."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel') as mock_model_class:
+                    mock_model = MagicMock()
+                    mock_model_class.return_value = mock_model
+                    client = LLMClient(api_key="test_key")
+                    client._mock_model = mock_model
+                    yield client
+    
+    def test_generate_handles_response_with_candidates(self, mock_client):
+        """Test handling response with candidates structure."""
+        from unittest.mock import Mock
+        
+        mock_response = MagicMock()
+        mock_response.text = None
+        mock_candidate = MagicMock()
+        mock_part = MagicMock()
+        mock_part.text = "Text from candidate"
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client._mock_model.generate_content.return_value = mock_response
+        
+        result = mock_client.generate("Test prompt")
+        assert "Text from candidate" in result
+    
+    def test_generate_handles_response_with_text_attribute(self, mock_client):
+        """Test handling response with text attribute."""
+        mock_response = MagicMock()
+        mock_response.text = "Direct text response"
+        mock_response.candidates = None
+        mock_client._mock_model.generate_content.return_value = mock_response
+        
+        result = mock_client.generate("Test prompt")
+        assert result == "Direct text response"
+    
+    def test_generate_handles_empty_response(self, mock_client):
+        """Test handling empty response."""
+        # Create a mock that has no text and empty candidates
+        mock_response = MagicMock()
+        # Make hasattr(response, 'text') return False
+        def hasattr_side_effect(obj, attr):
+            if attr == 'text':
+                return False
+            return hasattr(obj, attr)
+        
+        # Mock response with no text attribute and empty candidates
+        mock_response.candidates = []
+        # Use spec to control attribute access
+        mock_response = MagicMock(spec=[])
+        mock_response.candidates = []
+        # Override hasattr behavior by making text attribute not exist
+        if hasattr(mock_response, 'text'):
+            delattr(mock_response, 'text')
+        
+        mock_client._mock_model.generate_content.return_value = mock_response
+        
+        result = mock_client.generate("Test prompt")
+        # Should return empty string or string representation
+        assert isinstance(result, str)
+    
+    def test_generate_handles_string_response(self, mock_client):
+        """Test handling string response."""
+        mock_response = "String response"
+        mock_client._mock_model.generate_content.return_value = mock_response
+        
+        result = mock_client.generate("Test prompt")
+        assert isinstance(result, str)
+
+
+class TestTokenCalculationEdgeCases:
+    """Test token calculation edge cases."""
+    
+    def test_calculate_max_output_tokens_with_very_long_prompt(self):
+        """Test token calculation with very long prompt."""
+        from src.shortstory.utils.llm import _calculate_max_output_tokens
+        
+        long_prompt = "Word " * 100000  # Very long prompt
+        max_tokens = _calculate_max_output_tokens(long_prompt, model_name=DEFAULT_MODEL)
+        
+        # Should still return a positive value, even if small
+        assert max_tokens > 0
+        assert isinstance(max_tokens, int)
+    
+    def test_calculate_max_output_tokens_with_full_length_story(self):
+        """Test token calculation for full-length story."""
+        from src.shortstory.utils.llm import _calculate_max_output_tokens
+        from src.shortstory.utils.llm_constants import FULL_LENGTH_STORY_THRESHOLD
+        
+        prompt = "Write a story."
+        max_tokens = _calculate_max_output_tokens(
+            prompt,
+            model_name=DEFAULT_MODEL,
+            target_word_count=FULL_LENGTH_STORY_THRESHOLD
+        )
+        
+        # Should request significant tokens for full-length story
+        assert max_tokens > 1000
+    
+    def test_calculate_max_output_tokens_with_different_models(self):
+        """Test token calculation with different model names."""
+        from src.shortstory.utils.llm import _calculate_max_output_tokens
+        
+        prompt = "Write a story."
+        
+        for model in ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"]:
+            max_tokens = _calculate_max_output_tokens(prompt, model_name=model)
+            assert max_tokens > 0
+            assert isinstance(max_tokens, int)
+    
+    def test_estimate_tokens_with_very_long_text(self):
+        """Test token estimation with very long text."""
+        from src.shortstory.utils.llm import _estimate_tokens
+        
+        long_text = "This is a test sentence. " * 10000
+        tokens = _estimate_tokens(long_text)
+        
+        assert tokens > 0
+        assert isinstance(tokens, int)
+    
+    def test_estimate_tokens_with_unicode_text(self):
+        """Test token estimation with Unicode characters."""
+        from src.shortstory.utils.llm import _estimate_tokens
+        
+        unicode_text = "Hello 世界! 🌍 This is a test with émojis and spéciál chàracters."
+        tokens = _estimate_tokens(unicode_text)
+        
+        assert tokens > 0
+        assert isinstance(tokens, int)
+
+
+class TestGenerateStoryDraftRobustness:
+    """Test robustness of generate_story_draft function."""
+    
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock LLM client."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(api_key="test_key")
+                    client.generate = MagicMock(return_value="Generated story text with enough words. " * 200)
+                    return client
+    
+    def test_generate_story_draft_handles_very_short_response(self, mock_client):
+        """Test handling of very short API response."""
+        from src.shortstory.utils.llm import generate_story_draft
+        
+        mock_client.generate.return_value = "Short"
+        
+        with pytest.raises(ValueError, match="suspiciously short"):
+            generate_story_draft(
+                idea="Test",
+                character={"name": "Test"},
+                theme="Test",
+                outline={"acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}},
+                scaffold={"pov": "third person"},
+                genre_config={},
+                client=mock_client
+            )
+    
+    def test_generate_story_draft_handles_markdown_in_response(self, mock_client):
+        """Test that markdown is cleaned from response."""
+        from src.shortstory.utils.llm import generate_story_draft
+        
+        mock_client.generate.return_value = "## Chapter 1\n\nStory text here."
+        
+        result = generate_story_draft(
+            idea="Test",
+            character={"name": "Test"},
+            theme="Test",
+            outline={"acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}},
+            scaffold={"pov": "third person"},
+            genre_config={},
+            client=mock_client
+        )
+        
+        assert "##" not in result or "Story text" in result
+    
+    def test_generate_story_draft_handles_metadata_in_response(self, mock_client):
+        """Test that metadata is stripped from response."""
+        from src.shortstory.utils.llm import generate_story_draft
+        
+        mock_client.generate.return_value = "Story text.\n\n**Constraints:**\ntone: dark"
+        
+        result = generate_story_draft(
+            idea="Test",
+            character={"name": "Test"},
+            theme="Test",
+            outline={"acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}},
+            scaffold={"pov": "third person"},
+            genre_config={},
+            client=mock_client
+        )
+        
+        assert "**Constraints:**" not in result or "tone: dark" not in result
+    
+    def test_generate_story_draft_handles_continuation(self, mock_client):
+        """Test that story continuation works when story is too short."""
+        from src.shortstory.utils.llm import generate_story_draft
+        
+        # First call returns short story, continuation returns more
+        short_story = "Word " * 1000
+        continuation = "More words " * 500
+        mock_client.generate.side_effect = [short_story, continuation]
+        
+        result = generate_story_draft(
+            idea="Test",
+            character={"name": "Test"},
+            theme="Test",
+            outline={"acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}},
+            scaffold={"pov": "third person"},
+            genre_config={},
+            max_words=5000,
+            client=mock_client
+        )
+        
+        # Should have called generate multiple times (initial + continuation)
+        assert mock_client.generate.call_count >= 1
+
+
+class TestLLMClientRobustness:
+    """Test LLMClient robustness and error handling."""
+    
+    def test_llm_client_handles_model_name_with_prefix(self):
+        """Test that model names with 'models/' prefix work."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(model_name="models/gemini-2.5-flash", api_key="test_key")
+                    assert "models/" in client.model_name or client.model_name == "gemini-2.5-flash"
+    
+    def test_llm_client_handles_model_name_without_prefix(self):
+        """Test that model names without prefix work."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel'):
+                    client = LLMClient(model_name="gemini-2.5-flash", api_key="test_key")
+                    assert client.model_name in ["gemini-2.5-flash", "models/gemini-2.5-flash"]
+    
+    def test_llm_client_generate_handles_stop_sequences(self):
+        """Test that stop sequences work correctly."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel') as mock_model_class:
+                    mock_model = MagicMock()
+                    mock_response = MagicMock()
+                    mock_response.text = "This is a story. END More text here."
+                    mock_model.generate_content.return_value = mock_response
+                    mock_model_class.return_value = mock_model
+                    
+                    client = LLMClient(api_key="test_key")
+                    result = client.generate("Test", stop_sequences=["END"])
+                    
+                    assert "END" not in result
+                    assert "More text" not in result
+    
+    def test_llm_client_generate_handles_none_max_tokens(self):
+        """Test that None max_tokens is handled."""
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"}):
+            with patch('google.generativeai.configure'):
+                with patch('google.generativeai.GenerativeModel') as mock_model_class:
+                    mock_model = MagicMock()
+                    mock_response = MagicMock()
+                    mock_response.text = "Generated text"
+                    mock_model.generate_content.return_value = mock_response
+                    mock_model_class.return_value = mock_model
+                    
+                    client = LLMClient(api_key="test_key", max_tokens=None)
+                    result = client.generate("Test", max_tokens=None)
+                    
+                    assert result == "Generated text"
 

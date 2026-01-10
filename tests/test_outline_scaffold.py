@@ -10,14 +10,10 @@ from src.shortstory.genres import get_genre_config
 class TestOutlineGeneration:
     """Test suite for generate_outline method."""
     
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.pipeline = ShortStoryPipeline()
-        self.test_premise = {
-            "idea": "A lighthouse keeper collects lost voices",
-            "character": {"name": "Mara", "description": "A quiet keeper"},
-            "theme": "Untold stories"
-        }
+    @pytest.fixture(autouse=True)
+    def setup_pipeline(self, pipeline_with_premise_setup):
+        """Set up test fixtures using standardized pipeline setup fixture."""
+        self.pipeline, self.test_premise = pipeline_with_premise_setup
     
     def test_generate_outline_basic(self):
         """Test basic outline generation."""
@@ -137,25 +133,10 @@ class TestOutlineGeneration:
 class TestScaffolding:
     """Test suite for scaffold method."""
     
-    def setup_method(self):
-        """Set up test fixtures."""
-        self.pipeline = ShortStoryPipeline()
-        self.test_premise = {
-            "idea": "A lighthouse keeper collects lost voices",
-            "character": {"name": "Mara", "description": "A quiet keeper"},
-            "theme": "Untold stories"
-        }
-        self.test_outline = {
-            "premise": self.test_premise,
-            "genre": "General Fiction",
-            "framework": "narrative_arc",
-            "structure": ["setup", "complication", "resolution"],
-            "acts": {
-                "beginning": "setup",
-                "middle": "complication",
-                "end": "resolution"
-            }
-        }
+    @pytest.fixture(autouse=True)
+    def setup_pipeline(self, pipeline_with_outline_setup):
+        """Set up test fixtures using standardized pipeline setup fixture."""
+        self.pipeline, self.test_premise, self.test_outline = pipeline_with_outline_setup
     
     def test_scaffold_basic(self):
         """Test basic scaffolding."""

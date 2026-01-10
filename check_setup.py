@@ -44,7 +44,7 @@ def check_api_connection() -> tuple[bool, str]:
     logger = logging.getLogger(__name__)
     
     try:
-        from src.shortstory.utils import get_default_client
+        from src.shortstory.utils.llm import get_default_client
         client = get_default_client()
         is_available = client.check_availability()
         
@@ -74,8 +74,18 @@ def check_api_connection() -> tuple[bool, str]:
         return False, f"Connection error: {e}"
 
 
-def main():
-    """Run all setup checks."""
+def main() -> int:
+    """
+    Run all setup checks.
+    
+    Performs comprehensive setup verification including:
+    - Google API key configuration check
+    - Python dependencies installation check
+    - API connection test (if key and dependencies are available)
+    
+    Returns:
+        int: Exit code - 0 if all checks pass, 1 if any check fails.
+    """
     print("🔍 Checking Short Story Pipeline Setup...\n")
     
     all_checks_passed = True

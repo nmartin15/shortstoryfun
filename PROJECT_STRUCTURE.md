@@ -40,12 +40,36 @@ Example scripts demonstrating pipeline usage. Start here to understand how to us
 Unit tests for pipeline functionality. Includes tests for word count enforcement, distinctiveness validation, and voice consistency.
 
 ### Documentation Files
+
+**Core Documentation:**
 - **README.md**: Quick start and overview
 - **CONCEPTS.md**: Core principles and terminology (single source of truth)
 - **pipeline.md**: Detailed pipeline architecture
+- **planning.md**: Product requirements document (PRD)
+
+**Development & Tracking:**
 - **REQUIREMENTS_TRACKER.md**: Functional and non-functional requirements checklist
 - **tasks.md**: Task tracking
-- **planning.md**: Product requirements document
+- **PROJECT_STRUCTURE.md**: This file
+
+**Setup & Configuration:**
+- **SETUP_GOOGLE.md**: Google Gemini API setup
+- **STORAGE_IMPLEMENTATION.md**: Storage backends and configuration
+- **STORAGE_MIGRATION.md**: Migration guide
+
+**Deployment & Production:**
+- **DEPLOYMENT.md**: Production deployment guide
+- **PRODUCTION_IMPROVEMENTS.md**: Production improvements summary
+- **BACKGROUND_JOBS.md**: Background job processing
+
+**Testing & Quality:**
+- **TESTING.md**: Testing guide
+- **TEST_COVERAGE_IMPROVEMENTS.md**: Test coverage improvement plans
+
+**Architecture & Models:**
+- **ARCHITECTURAL_REFACTORING.md**: Refactoring suggestions
+- **STORY_MODEL_STANDARDIZATION.md**: Story model standardization
+- **stories/STORY_JSON_SCHEMA.md**: Story JSON schema
 
 ## Future Structure
 

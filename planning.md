@@ -1,6 +1,7 @@
 # Product Requirements Document (PRD) — Short Story Pipeline
 
-> **See [CONCEPTS.md](CONCEPTS.md) for core philosophy and principles.**
+> **See [CONCEPTS.md](CONCEPTS.md) for core philosophy and principles.**  
+> **See [pipeline.md](pipeline.md) for detailed pipeline architecture.**
 
 ## Vision
 Provide a modular, repo-ready pipeline for short story creation that prioritizes distinctive voice, memorable characters, and non-generic language. Every word must earn its place—stories should pop, not blend into generic narratives.

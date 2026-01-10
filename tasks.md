@@ -1,6 +1,7 @@
 # Task Notes — Short Story Pipeline
 
-> **See [CONCEPTS.md](CONCEPTS.md) for definitions of core tools referenced below.**
+> **See [CONCEPTS.md](CONCEPTS.md) for definitions of core tools referenced below.**  
+> **See [REQUIREMENTS_TRACKER.md](REQUIREMENTS_TRACKER.md) for requirements tracking.**
 
 ## Immediate Tasks
 - [x] Implement `ShortStoryPipeline` class

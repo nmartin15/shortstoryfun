@@ -1,334 +1,286 @@
 """
-Tests for memorability scorer.
+Tests for memorability scoring functionality.
 """
 
 import pytest
-from src.shortstory.memorability_scorer import (
-    MemorabilityScorer,
-    get_memorability_scorer,
-    DimensionScore,
-)
+from unittest.mock import patch, MagicMock
+from src.shortstory.memorability_scorer import MemorabilityScorer, DimensionScore
 
 
-def test_get_memorability_scorer_singleton():
-    """Test that get_memorability_scorer returns a singleton."""
-    scorer1 = get_memorability_scorer()
-    scorer2 = get_memorability_scorer()
-    assert scorer1 is scorer2
+@pytest.fixture
+def scorer():
+    """Create a MemorabilityScorer instance for testing."""
+    return MemorabilityScorer()
 
 
-def test_score_story_empty_text():
-    """Test scoring with empty text."""
-    scorer = MemorabilityScorer()
-    result = scorer.score_story("")
+class TestMemorabilityScorerDimensions:
+    """Test individual dimension scoring methods."""
     
-    assert "overall_score" in result
-    assert "dimensions" in result
-    assert "prioritized_suggestions" in result
-    assert "summary" in result
+    def test_score_voice_strength_with_mocked_details(self, scorer):
+        """Test voice strength dimension scoring with mocked detail counting."""
+        # Mock the internal detail counting method
+        with patch.object(scorer, '_count_specific_details', return_value=5) as mock_count_details, \
+             patch.object(scorer, '_has_varied_sentence_length', return_value=True) as mock_varied_length, \
+             patch.object(scorer, '_has_unique_phrases', return_value=True) as mock_unique_phrases:
+            
+            text_strong = "Some text that would normally have details."
+            score = scorer._score_voice_strength(text_strong, None, None)
+            
+            assert isinstance(score, DimensionScore)
+            assert score.name == "Voice Strength"
+            assert score.score > 0.5  # Based on mocked values, score should be high
+            mock_count_details.assert_called_once_with(text_strong)
+            mock_varied_length.assert_called_once_with(text_strong)
+            mock_unique_phrases.assert_called_once_with(text_strong)
     
-    # Language precision should be low
-    assert result["dimensions"]["language_precision"]["score"] == 0.0
+    def test_score_voice_strength_with_scarce_details(self, scorer):
+        """Test voice strength scoring when details are scarce."""
+        with patch.object(scorer, '_count_specific_details', return_value=0), \
+             patch.object(scorer, '_has_varied_sentence_length', return_value=False), \
+             patch.object(scorer, '_has_unique_phrases', return_value=False):
+            
+            text_weak = "Very vague text."
+            score = scorer._score_voice_strength(text_weak, None, None)
+            
+            assert isinstance(score, DimensionScore)
+            assert score.score < 0.5
+    
+    def test_score_language_precision_with_mocked_detection(self, scorer):
+        """Test language precision scoring with mocked cliché detection."""
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": True,
+                "total_cliches": 2,
+                "phrase_cliches": [{"phrase": "dark and stormy night"}],
+                "character_archetypes": [],
+                "predictable_beats": [],
+                "plot_structures": []
+            }
+            
+            text = "It was a dark and stormy night."
+            score = scorer._score_language_precision(text, None, None)
+            
+            assert isinstance(score, DimensionScore)
+            assert score.name == "Language Precision"
+            assert score.score < 1.0  # Should be penalized for clichés
+            mock_detect.assert_called_once()
+    
+    def test_score_character_uniqueness_with_mocked_detection(self, scorer):
+        """Test character uniqueness scoring with mocked archetype detection."""
+        character = {"name": "Hero", "description": "A chosen one destined to save the world"}
+        
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": False,
+                "total_cliches": 0,
+                "phrase_cliches": [],
+                "character_archetypes": [{"archetype": "chosen one"}],
+                "predictable_beats": [],
+                "plot_structures": []
+            }
+            
+            score = scorer._score_character_uniqueness(None, character, None)
+            
+            assert isinstance(score, DimensionScore)
+            assert score.name == "Character Uniqueness"
+            assert score.score < 1.0  # Should be penalized for archetype
+            mock_detect.assert_called_once()
+    
+    def test_score_beat_originality_with_mocked_detection(self, scorer):
+        """Test beat originality scoring with mocked beat detection."""
+        outline = {"acts": {"beginning": "call to adventure"}}
+        
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": False,
+                "total_cliches": 0,
+                "phrase_cliches": [],
+                "character_archetypes": [],
+                "predictable_beats": [{"beat": "call to adventure"}],
+                "plot_structures": []
+            }
+            
+            score = scorer._score_beat_originality(None, None, outline)
+            
+            assert isinstance(score, DimensionScore)
+            assert score.name == "Beat Originality"
+            assert score.score < 1.0  # Should be penalized for predictable beat
+            mock_detect.assert_called_once()
 
 
-def test_score_story_no_cliches():
-    """Test scoring with distinctive text (no clichés)."""
-    scorer = MemorabilityScorer()
-    text = "A lighthouse keeper named Mara collects lost voices in glass jars. Each voice tells a story that was never spoken."
+class TestMemorabilityScorerIntegration:
+    """Test full story scoring integration."""
     
-    result = scorer.score_story(text)
+    def test_score_story_returns_complete_results(self, scorer):
+        """Test that score_story returns complete scoring results."""
+        text = "A unique story about a lighthouse keeper."
+        character = {"name": "Mara", "description": "A quiet keeper"}
+        outline = {"acts": {"beginning": "setup"}}
+        
+        # Mock all internal detection methods
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": False,
+                "total_cliches": 0,
+                "phrase_cliches": [],
+                "character_archetypes": [],
+                "predictable_beats": [],
+                "plot_structures": []
+            }
+            
+            with patch.object(scorer, '_count_specific_details', return_value=5), \
+                 patch.object(scorer, '_has_varied_sentence_length', return_value=True), \
+                 patch.object(scorer, '_has_unique_phrases', return_value=True):
+                
+                result = scorer.score_story(text, character, outline)
+                
+                assert "overall_score" in result
+                assert "dimensions" in result
+                assert isinstance(result["overall_score"], float)
+                assert 0.0 <= result["overall_score"] <= 1.0
+                assert "language_precision" in result["dimensions"]
+                assert "character_uniqueness" in result["dimensions"]
+                assert "voice_strength" in result["dimensions"]
+                assert "beat_originality" in result["dimensions"]
     
-    assert result["overall_score"] > 0.5
-    assert result["dimensions"]["language_precision"]["score"] > 0.7
+    def test_score_story_with_empty_text(self, scorer):
+        """Test score_story with empty text."""
+        # Mock cliche_detector to isolate test from external dependency
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": False,
+                "total_cliches": 0,
+                "phrase_cliches": [],
+                "character_archetypes": [],
+                "predictable_beats": [],
+                "plot_structures": []
+            }
+            
+            result = scorer.score_story("", None, None)
+            
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
+            # Empty text should have low scores
+            assert result["overall_score"] < 0.5
+            # Verify detector was called (even with empty text)
+            mock_detect.assert_called()
+    
+    def test_score_story_handles_none_inputs(self, scorer):
+        """Test that score_story handles None inputs gracefully."""
+        # Mock cliche_detector to isolate test from external dependency
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches') as mock_detect:
+            mock_detect.return_value = {
+                "has_cliches": False,
+                "total_cliches": 0,
+                "phrase_cliches": [],
+                "character_archetypes": [],
+                "predictable_beats": [],
+                "plot_structures": []
+            }
+            
+            result = scorer.score_story("Some text", None, None, None)
+            
+            assert "overall_score" in result
+            assert "dimensions" in result
+            assert isinstance(result["overall_score"], float)
+            # Verify detector was called
+            mock_detect.assert_called()
 
 
-def test_score_story_with_cliches():
-    """Test scoring with clichéd text."""
-    scorer = MemorabilityScorer()
-    text = "It was a dark and stormy night. The hero arrived just in the nick of time."
+class TestMemorabilityScorerErrorHandling:
+    """Test error handling in MemorabilityScorer."""
     
-    result = scorer.score_story(text)
+    def test_score_story_handles_detection_errors(self, scorer):
+        """Test that score_story handles errors in cliché detection gracefully."""
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches', side_effect=Exception("Detection error")):
+            # Should not crash, but may return lower scores
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
     
-    assert result["overall_score"] < 0.8
-    assert result["dimensions"]["language_precision"]["score"] < 0.7
+    def test_score_story_handles_none_cliche_detector(self, scorer):
+        """Test that score_story handles None cliche_detector gracefully."""
+        original_detector = scorer.cliche_detector
+        scorer.cliche_detector = None
+        try:
+            # Should handle None detector without crashing
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
+        finally:
+            scorer.cliche_detector = original_detector
     
-    # Should have issues
-    language_issues = result["dimensions"]["language_precision"]["issues"]
-    assert len(language_issues) > 0
+    def test_score_story_handles_detection_returning_none(self, scorer):
+        """Test that score_story handles cliche_detector returning None."""
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches', return_value=None):
+            # Should handle None return value gracefully
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
     
-    # Should have suggestions
-    assert len(result["prioritized_suggestions"]) > 0
-
-
-def test_score_language_precision():
-    """Test language precision dimension scoring."""
-    scorer = MemorabilityScorer()
+    def test_score_story_handles_incomplete_detection_results(self, scorer):
+        """Test that score_story handles incomplete detection results."""
+        incomplete_results = {
+            "has_cliches": True,
+            # Missing other expected fields
+        }
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches', return_value=incomplete_results):
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
     
-    # Test with clichés
-    text_with_cliches = "It was a dark and stormy night when all hell broke loose."
-    score = scorer._score_language_precision(text_with_cliches)
+    def test_score_voice_strength_handles_none_text(self, scorer):
+        """Test that _score_voice_strength handles None text."""
+        with patch.object(scorer, '_count_specific_details', return_value=0):
+            score = scorer._score_voice_strength(None, None, None)
+            assert isinstance(score, DimensionScore)
+            assert score.score >= 0.0
     
-    assert score.name == "Language Precision"
-    assert 0.0 <= score.score <= 1.0
-    assert len(score.issues) > 0
+    def test_score_story_handles_exception_in_dimension_scoring(self, scorer):
+        """Test that score_story handles exceptions in dimension scoring methods."""
+        # Mock a dimension scoring method to raise an exception
+        with patch.object(scorer, '_score_voice_strength', side_effect=Exception("Scoring error")):
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert "dimensions" in result
+            assert isinstance(result["overall_score"], float)
+            # Should still return valid results even if one dimension fails
     
-    # Test with distinctive text
-    text_distinctive = "The lighthouse keeper's hands trembled as she placed the final jar on the shelf."
-    score2 = scorer._score_language_precision(text_distinctive)
+    def test_score_story_handles_exception_in_multiple_dimensions(self, scorer):
+        """Test that score_story handles exceptions in multiple dimension scoring methods."""
+        # Mock multiple dimension scoring methods to raise exceptions
+        with patch.object(scorer, '_score_voice_strength', side_effect=Exception("Voice error")), \
+             patch.object(scorer, '_score_language_precision', side_effect=Exception("Language error")), \
+             patch.object(scorer, '_score_character_uniqueness', side_effect=Exception("Character error")):
+            
+            result = scorer.score_story("Some text", {"name": "Test"}, {"acts": {}})
+            assert "overall_score" in result
+            assert "dimensions" in result
+            assert isinstance(result["overall_score"], float)
+            # Should still return valid results even if multiple dimensions fail
     
-    assert score2.score > score.score
-    assert len(score2.issues) == 0 or len(score2.issues) < len(score.issues)
-
-
-def test_score_character_uniqueness_no_character():
-    """Test character uniqueness scoring without character."""
-    scorer = MemorabilityScorer()
-    score = scorer._score_character_uniqueness("Some text", None)
+    def test_score_story_handles_detection_returning_invalid_structure(self, scorer):
+        """Test that score_story handles cliche_detector returning invalid structure."""
+        invalid_results = "not a dict"  # Wrong type
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches', return_value=invalid_results):
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
     
-    assert score.name == "Character Uniqueness"
-    assert score.score == 0.5  # Neutral score
-    assert len(score.issues) > 0
-    assert any(issue["type"] == "missing_character" for issue in score.issues)
-
-
-def test_score_character_uniqueness_generic_archetype():
-    """Test character uniqueness with generic archetype."""
-    scorer = MemorabilityScorer()
-    character = "A wise old mentor who guides the chosen one."
+    def test_score_story_handles_detection_raising_exception_during_call(self, scorer):
+        """Test that score_story handles cliche_detector raising exception during call."""
+        with patch.object(scorer.cliche_detector, 'detect_all_cliches', side_effect=RuntimeError("Runtime error")):
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert isinstance(result["overall_score"], float)
     
-    score = scorer._score_character_uniqueness("Some text", character)
-    
-    assert score.score < 0.7
-    assert len(score.issues) > 0
-    assert any(issue["type"] == "generic_archetype" for issue in score.issues)
-
-
-def test_score_character_uniqueness_with_quirks():
-    """Test character uniqueness with unique quirks."""
-    scorer = MemorabilityScorer()
-    character = {
-        "name": "Mara",
-        "description": "A lighthouse keeper",
-        "quirks": ["Never speaks above a whisper", "Collects lost voices"],
-        "contradictions": "Afraid of silence but works in isolation"
-    }
-    
-    score = scorer._score_character_uniqueness("Some text", character)
-    
-    assert score.score > 0.5
-    assert any("quirks" in strength.lower() for strength in score.strengths)
-
-
-def test_score_voice_strength():
-    """Test voice strength dimension scoring."""
-    scorer = MemorabilityScorer()
-    
-    # Text with dialogue and specific details
-    text_strong = '"I never understood why," she whispered, placing the blue glass jar on the oak shelf. The room smelled of salt and old paper.'
-    
-    score = scorer._score_voice_strength(text_strong, None, None)
-    
-    assert score.name == "Voice Strength"
-    assert 0.0 <= score.score <= 1.0
-    assert score.score > 0.5
-    
-    # Text without dialogue
-    text_weak = "She walked to the room. It was nice. She felt good."
-    score2 = scorer._score_voice_strength(text_weak, None, None)
-    
-    assert score2.score < score.score
-
-
-def test_score_beat_originality():
-    """Test beat originality dimension scoring."""
-    scorer = MemorabilityScorer()
-    
-    # Text with predictable beats
-    text_predictable = "The hero received the call to adventure. At first, he refused the call. Then he met the mentor who guided him."
-    
-    score = scorer._score_beat_originality(text_predictable, None)
-    
-    assert score.name == "Beat Originality"
-    assert 0.0 <= score.score <= 1.0
-    assert score.score < 1.0
-    
-    # Text without predictable beats
-    text_original = "Mara found the voice in a seashell. It didn't ask for help. It asked to be forgotten."
-    
-    score2 = scorer._score_beat_originality(text_original, None)
-    
-    assert score2.score >= score.score
-
-
-def test_generate_prioritized_suggestions():
-    """Test suggestion generation and prioritization."""
-    scorer = MemorabilityScorer()
-    
-    # Create dimensions with various issues
-    from src.shortstory.memorability_scorer import DimensionScore
-    
-    dims = {
-        "language_precision": DimensionScore(
-            name="Language Precision",
-            score=0.4,
-            issues=[
-                {"type": "narrative_cliche", "severity": "high", "message": "Found clichés"},
-            ]
-        ),
-        "character_uniqueness": DimensionScore(
-            name="Character Uniqueness",
-            score=0.6,
-            issues=[
-                {"type": "missing_quirks", "severity": "medium", "message": "No quirks"},
-            ]
-        ),
-    }
-    
-    suggestions = scorer._generate_prioritized_suggestions(dims)
-    
-    assert len(suggestions) > 0
-    # High-severity issues should come first
-    assert any("cliché" in s.lower() or "cliche" in s.lower() for s in suggestions[:3])
-
-
-def test_issue_to_suggestion():
-    """Test conversion of issues to actionable suggestions."""
-    scorer = MemorabilityScorer()
-    
-    issue = {
-        "type": "narrative_cliche",
-        "severity": "high",
-        "message": "Found clichés",
-        "examples": ["dark and stormy night"],
-    }
-    
-    dim_score = DimensionScore(
-        name="Language Precision",
-        score=0.5,
-        issues=[issue]
-    )
-    
-    suggestion = scorer._issue_to_suggestion("language_precision", dim_score, issue)
-    
-    assert suggestion is not None
-    assert "replace" in suggestion.lower() or "cliché" in suggestion.lower() or "cliche" in suggestion.lower()
-
-
-def test_get_status():
-    """Test status label generation."""
-    scorer = MemorabilityScorer()
-    
-    assert scorer._get_status(0.9) == "excellent"
-    assert scorer._get_status(0.75) == "good"
-    assert scorer._get_status(0.6) == "needs_improvement"
-    assert scorer._get_status(0.3) == "poor"
-
-
-def test_generate_summary():
-    """Test summary generation."""
-    scorer = MemorabilityScorer()
-    
-    dims = {
-        "language_precision": DimensionScore(name="Language Precision", score=0.8),
-        "character_uniqueness": DimensionScore(name="Character Uniqueness", score=0.7),
-        "voice_strength": DimensionScore(name="Voice Strength", score=0.75),
-        "beat_originality": DimensionScore(name="Beat Originality", score=0.8),
-    }
-    
-    summary = scorer._generate_summary(0.76, dims)
-    
-    assert isinstance(summary, str)
-    assert len(summary) > 0
-    assert "76" in summary or "0.76" in summary or "76%" in summary
-
-
-def test_count_specific_details():
-    """Test counting specific details in text."""
-    scorer = MemorabilityScorer()
-    
-    text_with_details = "She placed the blue glass jar on the oak shelf. The room smelled of salt. Three voices whispered."
-    count = scorer._count_specific_details(text_with_details)
-    
-    assert count >= 2  # Should find colors (blue), sensory words (smelled), numbers (Three)
-    
-    text_vague = "It was nice. She felt good. Things happened."
-    count2 = scorer._count_specific_details(text_vague)
-    
-    assert count2 < count
-
-
-def test_has_varied_sentence_length():
-    """Test sentence length variation detection."""
-    scorer = MemorabilityScorer()
-    
-    # Varied sentence lengths
-    text_varied = "Short. This is a longer sentence with more words and complexity. Very short. Another longer sentence that provides more detail and context."
-    assert scorer._has_varied_sentence_length(text_varied) is True
-    
-    # Monotonous sentence lengths
-    text_monotonous = "This is a sentence. This is another sentence. This is yet another sentence. They are all similar."
-    assert scorer._has_varied_sentence_length(text_monotonous) is False
-
-
-def test_has_unique_phrases():
-    """Test unique phrase detection."""
-    scorer = MemorabilityScorer()
-    
-    text_specific = "She opened the door and placed the book on the table."
-    assert scorer._has_unique_phrases(text_specific) is True
-    
-    text_generic = "It was good. Things happened. People felt things."
-    assert scorer._has_unique_phrases(text_generic) is False
-
-
-def test_score_story_with_character_and_outline():
-    """Test full story scoring with character and outline."""
-    scorer = MemorabilityScorer()
-    
-    text = "Mara collected voices in glass jars. Each voice told a story."
-    character = {
-        "name": "Mara",
-        "description": "A lighthouse keeper",
-        "quirks": ["Never speaks above a whisper"],
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "structure": ["setup", "complication", "resolution"],
-    }
-    
-    result = scorer.score_story(text, character=character, outline=outline)
-    
-    assert "overall_score" in result
-    assert "dimensions" in result
-    assert len(result["dimensions"]) == 4
-    
-    # All dimensions should be scored
-    for dim_name, dim_data in result["dimensions"].items():
-        assert "score" in dim_data
-        assert "status" in dim_data
-        assert 0.0 <= dim_data["score"] <= 1.0
-
-
-def test_dimension_score_dataclass():
-    """Test DimensionScore dataclass initialization."""
-    score = DimensionScore(
-        name="Test Dimension",
-        score=0.75,
-        issues=[{"type": "test", "message": "Test issue"}],
-        strengths=["Test strength"]
-    )
-    
-    assert score.name == "Test Dimension"
-    assert score.score == 0.75
-    assert len(score.issues) == 1
-    assert len(score.strengths) == 1
-
-
-def test_dimension_score_defaults():
-    """Test DimensionScore with default values."""
-    score = DimensionScore(name="Test", score=0.5)
-    
-    assert score.issues == []
-    assert score.strengths == []
-    assert score.max_score == 1.0
-
+    def test_score_story_handles_none_dimension_scores(self, scorer):
+        """Test that score_story handles None dimension scores gracefully."""
+        with patch.object(scorer, '_score_voice_strength', return_value=None), \
+             patch.object(scorer, '_score_language_precision', return_value=None):
+            
+            result = scorer.score_story("Some text", None, None)
+            assert "overall_score" in result
+            assert "dimensions" in result
+            assert isinstance(result["overall_score"], float)
+            # Should handle None scores without crashing

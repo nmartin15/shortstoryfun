@@ -14,7 +14,7 @@ from .utils.validation import (
     detect_cliches,
     detect_generic_archetypes,
     calculate_distinctiveness_score,
-    _detect_generic_patterns,
+    detect_generic_patterns_from_text,
 )
 from .cliche_detector import get_cliche_detector
 
@@ -174,7 +174,7 @@ class MemorabilityScorer:
         cliche_details = cliche_results.get("cliche_details", [])
         
         # Detect generic patterns
-        pattern_results = _detect_generic_patterns(text, text_lower)
+        pattern_results = detect_generic_patterns_from_text(text)
         
         # Calculate base score
         base_score = calculate_distinctiveness_score(

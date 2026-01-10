@@ -11,6 +11,9 @@ google-generativeai>=0.3.0
 # Environment variable management
 python-dotenv>=1.0.0
 
+# CLI framework
+click>=8.0.0
+
 # PDF generation
 reportlab>=4.0.0
 
@@ -25,6 +28,10 @@ gunicorn>=21.2.0
 
 # Redis for rate limiting (optional, but recommended for production)
 redis>=5.0.0
+
+# Background job queue
+rq>=1.15.0
+rq-dashboard>=0.6.1
 
 # Token counting for accurate LLM token estimation
 tiktoken>=0.5.0

@@ -1,5 +1,9 @@
 # Core Concepts — Short Story Pipeline
 
+> **This is the single source of truth for core principles and terminology.**  
+> **See [pipeline.md](pipeline.md) for pipeline architecture.**  
+> **See [planning.md](planning.md) for the Product Requirements Document (PRD).**
+
 This document defines the foundational principles and terminology used throughout the pipeline. Reference this document rather than redefining concepts elsewhere.
 
 ## Core Philosophy

@@ -1,5 +1,7 @@
 # Test Coverage Improvements — Nice-to-Have Enhancements
 
+> **See [TESTING.md](TESTING.md) for the current testing guide.**
+
 This document outlines test coverage improvements that would enhance the quality and reliability of the Short Story Pipeline project. These are **nice-to-have enhancements** that go beyond the current test suite.
 
 ## 📊 Current Test Coverage Status
@@ -519,7 +521,6 @@ def test_database(tmp_path):
 ## 🔗 Related Documents
 
 - [TESTING.md](TESTING.md) - Current testing guide
-- [ai-review-2025-12-31T15-41-28.md](ai-review-2025-12-31T15-41-28.md) - AI review with testing issues
 - [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) - Project structure overview
 
 ---

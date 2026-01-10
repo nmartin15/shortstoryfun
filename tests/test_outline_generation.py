@@ -4,7 +4,6 @@ Tests for outline generation functionality.
 
 import pytest
 from src.shortstory.utils.llm import generate_outline_structure
-from src.shortstory.pipeline import ShortStoryPipeline
 
 
 def test_generate_outline_structure_template_fallback():
@@ -93,16 +92,9 @@ def test_generate_outline_structure_no_theme():
     assert "end" in outline
 
 
-def test_pipeline_generate_outline():
+def test_pipeline_generate_outline(pipeline_with_premise):
     """Test pipeline outline generation."""
-    pipeline = ShortStoryPipeline()
-    
-    idea = "A lighthouse keeper collects lost voices in glass jars."
-    character = {"name": "Mara", "description": "A lighthouse keeper", "quirks": ["Never speaks above a whisper"]}
-    theme = "What happens to stories we never tell?"
-    
-    # Capture premise first
-    pipeline.capture_premise(idea, character, theme, validate=False)
+    pipeline = pipeline_with_premise
     
     # Generate outline
     outline = pipeline.generate_outline(use_llm=False)
@@ -127,9 +119,9 @@ def test_pipeline_generate_outline():
     assert "is_valid" in outline["beat_validation"]
 
 
-def test_pipeline_generate_outline_with_genre():
+def test_pipeline_generate_outline_with_genre(basic_pipeline):
     """Test pipeline outline generation with genre."""
-    pipeline = ShortStoryPipeline()
+    pipeline = basic_pipeline
     
     idea = "A detective investigates a crime that defies logic."
     character = {"name": "Detective", "description": "A seasoned investigator"}
@@ -146,17 +138,17 @@ def test_pipeline_generate_outline_with_genre():
     assert outline["framework"] == "mystery_arc"
 
 
-def test_pipeline_generate_outline_requires_premise():
+def test_pipeline_generate_outline_requires_premise(basic_pipeline):
     """Test that outline generation requires a premise."""
-    pipeline = ShortStoryPipeline()
+    pipeline = basic_pipeline
     
     with pytest.raises(ValueError, match="Cannot generate outline without premise"):
         pipeline.generate_outline()
 
 
-def test_pipeline_generate_outline_requires_idea():
+def test_pipeline_generate_outline_requires_idea(basic_pipeline):
     """Test that outline generation requires an idea in premise."""
-    pipeline = ShortStoryPipeline()
+    pipeline = basic_pipeline
     
     # Capture premise without idea
     pipeline.premise = {"character": {"name": "Test"}, "theme": "Test theme"}
@@ -219,9 +211,9 @@ def test_outline_voice_opportunities():
     assert len(outline["voice_opportunities"]) > 0
 
 
-def test_outline_beat_validation():
+def test_outline_beat_validation(basic_pipeline):
     """Test that outline validates against predictable beats."""
-    pipeline = ShortStoryPipeline()
+    pipeline = basic_pipeline
     
     idea = "A hero receives the call to adventure and meets a mentor."
     character = {"name": "Hero", "description": "A chosen one"}

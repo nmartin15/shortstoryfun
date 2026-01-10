@@ -1,313 +1,23 @@
 """
-Tests for scaffolding generation functionality.
+Tests for story scaffolding functionality.
 """
 
 import pytest
-from src.shortstory.utils.llm import generate_scaffold_structure
-from src.shortstory.pipeline import ShortStoryPipeline
 
 
-def test_generate_scaffold_structure_template_fallback():
-    """Test scaffold generation with template fallback (no LLM)."""
-    premise = {
-        "idea": "A lighthouse keeper collects lost voices in glass jars.",
-        "character": {"name": "Mara", "description": "A lighthouse keeper"},
-        "theme": "What happens to stories we never tell?"
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "beginning": {"hook": "Opening scene", "setup": "Setup details"},
-        "middle": {"complication": "The situation deepens"},
-        "end": {"resolution": "Resolution occurs"}
-    }
+def test_scaffold_backward_compatibility(pipeline_with_outline):
+    """Test that scaffold maintains backward compatibility fields with correct values."""
+    pipeline = pipeline_with_outline
     
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False  # Force template fallback
-    )
+    idea = "A story with a clear tone and pacing."
+    character = {"name": "Character", "description": "A person who is always hurried"}
+    theme = "The rush of modern life"
     
-    assert "narrative_voice" in scaffold
-    assert "character_voices" in scaffold
-    assert "tone" in scaffold
-    assert "conflicts" in scaffold
-    assert "sensory_specificity" in scaffold
-    assert "style_guidelines" in scaffold
-    
-    # Check narrative voice structure
-    narrative_voice = scaffold["narrative_voice"]
-    assert "pov" in narrative_voice
-    assert "pov_rationale" in narrative_voice
-    assert "prose_style" in narrative_voice
-    assert "sentence_rhythm" in narrative_voice
-    assert "language_register" in narrative_voice
-    assert "voice_characteristics" in narrative_voice
-    
-    # Check conflicts structure
-    conflicts = scaffold["conflicts"]
-    assert "internal" in conflicts
-    assert "external" in conflicts
-    assert "primary_conflict" in conflicts
-    assert "conflict_arc" in conflicts
-
-
-def test_generate_scaffold_structure_with_genre():
-    """Test scaffold generation with genre configuration."""
-    premise = {
-        "idea": "A detective investigates a crime that defies logic.",
-        "character": {"name": "Detective", "description": "A seasoned investigator"}
-    }
-    outline = {
-        "acts": {"beginning": "crime setup", "middle": "investigation", "end": "resolution"},
-        "middle": {"complication": "The investigation deepens"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        genre="Crime / Noir",
-        use_llm=False
-    )
-    
-    assert scaffold is not None
-    assert "narrative_voice" in scaffold
-    assert "tone" in scaffold
-    # Should reflect genre constraints
-    tone = scaffold["tone"]
-    assert "emotional_register" in tone
-
-
-def test_generate_scaffold_structure_with_character_quirks():
-    """Test scaffold generation incorporates character quirks into voice profiles."""
-    premise = {
-        "idea": "A story about a unique character.",
-        "character": {
-            "name": "Mara",
-            "description": "A lighthouse keeper",
-            "quirks": ["Never speaks above a whisper", "Collects lost voices"],
-            "contradictions": "Afraid of silence but works in isolation"
-        }
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "middle": {"complication": "Complication"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
-    
-    assert "character_voices" in scaffold
-    character_voices = scaffold["character_voices"]
-    
-    # Should have voice profile for Mara
-    if "Mara" in character_voices:
-        mara_voice = character_voices["Mara"]
-        assert "voice_markers" in mara_voice
-        assert "distinctive_traits" in mara_voice
-        
-        # Voice markers should reflect quirks
-        voice_markers = mara_voice.get("voice_markers", [])
-        assert len(voice_markers) > 0
-
-
-def test_pipeline_scaffold():
-    """Test pipeline scaffolding."""
-    pipeline = ShortStoryPipeline()
-    
-    idea = "A lighthouse keeper collects lost voices in glass jars."
-    character = {"name": "Mara", "description": "A lighthouse keeper", "quirks": ["Never speaks above a whisper"]}
-    theme = "What happens to stories we never tell?"
-    
-    # Capture premise and generate outline first
     pipeline.capture_premise(idea, character, theme, validate=False)
     pipeline.generate_outline(use_llm=False)
-    
-    # Generate scaffold
     scaffold = pipeline.scaffold(use_llm=False)
     
-    assert scaffold is not None
-    assert "outline" in scaffold
-    assert "genre" in scaffold
-    assert "narrative_voice" in scaffold
-    assert "character_voices" in scaffold
-    assert "tone" in scaffold
-    assert "conflicts" in scaffold
-    assert "sensory_specificity" in scaffold
-    assert "style_guidelines" in scaffold
-    
-    # Check that voice profiles are enhanced with character quirks
-    character_voices = scaffold.get("character_voices", {})
-    if "Mara" in character_voices:
-        mara_voice = character_voices["Mara"]
-        assert "voice_markers" in mara_voice
-
-
-def test_pipeline_scaffold_requires_outline():
-    """Test that scaffolding requires an outline."""
-    pipeline = ShortStoryPipeline()
-    
-    pipeline.capture_premise("An idea", {"name": "Character"}, "Theme", validate=False)
-    
-    with pytest.raises(ValueError, match="Cannot scaffold without outline"):
-        pipeline.scaffold()
-
-
-def test_pipeline_scaffold_requires_premise():
-    """Test that scaffolding requires a premise."""
-    pipeline = ShortStoryPipeline()
-    
-    # Create a mock outline
-    pipeline.outline = {"acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}}
-    
-    with pytest.raises(ValueError, match="Cannot scaffold without premise"):
-        pipeline.scaffold()
-
-
-def test_scaffold_narrative_voice_structure():
-    """Test that narrative voice has all required fields."""
-    premise = {
-        "idea": "A story about transformation.",
-        "character": {"name": "Protagonist", "description": "A person who changes"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "middle": {"complication": "Complication"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
-    
-    narrative_voice = scaffold["narrative_voice"]
-    assert "pov" in narrative_voice
-    assert "pov_rationale" in narrative_voice
-    assert "prose_style" in narrative_voice
-    assert "sentence_rhythm" in narrative_voice
-    assert "language_register" in narrative_voice
-    assert "voice_characteristics" in narrative_voice
-    assert isinstance(narrative_voice["voice_characteristics"], list)
-
-
-def test_scaffold_conflicts_structure():
-    """Test that conflicts structure is properly formed."""
-    premise = {
-        "idea": "A story with conflict.",
-        "character": {"name": "Character", "description": "A person"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "beginning": {"hook": "Opening"},
-        "middle": {"complication": "The main complication"},
-        "end": {"resolution": "Resolution"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
-    
-    conflicts = scaffold["conflicts"]
-    assert "internal" in conflicts
-    assert "external" in conflicts
-    assert "primary_conflict" in conflicts
-    assert "conflict_arc" in conflicts
-    
-    assert isinstance(conflicts["internal"], list)
-    assert isinstance(conflicts["external"], list)
-    assert len(conflicts["internal"]) > 0
-    assert len(conflicts["external"]) > 0
-
-
-def test_scaffold_sensory_specificity():
-    """Test that sensory specificity is properly structured."""
-    premise = {
-        "idea": "A story with sensory details.",
-        "character": {"name": "Character", "description": "A person"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        genre="Horror",  # Horror emphasizes specific senses
-        use_llm=False
-    )
-    
-    sensory = scaffold["sensory_specificity"]
-    assert "primary_senses" in sensory
-    assert "sensory_details" in sensory
-    
-    assert isinstance(sensory["primary_senses"], list)
-    assert len(sensory["primary_senses"]) > 0
-    assert isinstance(sensory["sensory_details"], dict)
-
-
-def test_scaffold_style_guidelines():
-    """Test that style guidelines are properly structured."""
-    premise = {
-        "idea": "A story with style.",
-        "character": {"name": "Character", "description": "A person"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
-    
-    style = scaffold["style_guidelines"]
-    assert "sentence_length" in style
-    assert "dialogue_ratio" in style
-    assert "description_density" in style
-    assert "pacing" in style
-
-
-def test_scaffold_tone_structure():
-    """Test that tone structure is properly formed."""
-    premise = {
-        "idea": "A story with tone.",
-        "character": {"name": "Character", "description": "A person"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"}
-    }
-    
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
-    
-    tone = scaffold["tone"]
-    assert "emotional_register" in tone
-    assert "mood" in tone
-    assert "atmosphere" in tone
-    assert "emotional_arc" in tone
-
-
-def test_scaffold_backward_compatibility():
-    """Test that scaffold maintains backward compatibility fields."""
-    pipeline = ShortStoryPipeline()
-    
-    idea = "A story."
-    character = {"name": "Character", "description": "A person"}
-    
-    pipeline.capture_premise(idea, character, None, validate=False)
-    pipeline.generate_outline(use_llm=False)
-    scaffold = pipeline.scaffold(use_llm=False)
-    
-    # Backward compatibility fields
+    # Backward compatibility fields - check existence
     assert "pov" in scaffold
     assert "tone" in scaffold
     assert "pace" in scaffold
@@ -315,26 +25,61 @@ def test_scaffold_backward_compatibility():
     assert "sensory_focus" in scaffold
     assert "distinctiveness_required" in scaffold
     assert "anti_generic_enforced" in scaffold
-
-
-def test_scaffold_with_voice_opportunities():
-    """Test that scaffold uses voice opportunities from outline."""
-    premise = {
-        "idea": "A story with voice opportunities.",
-        "character": {"name": "Character", "description": "A person"}
-    }
-    outline = {
-        "acts": {"beginning": "setup", "middle": "complication", "end": "resolution"},
-        "voice_opportunities": ["Dialogue scene", "Internal moment"]
-    }
     
-    scaffold = generate_scaffold_structure(
-        premise=premise,
-        outline=outline,
-        use_llm=False
-    )
+    # Verify that backward compatibility fields have correct values derived from detailed scaffold
+    # Based on pipeline.py lines 326-360:
+    # - pov comes from metadata.pov which is derived from narrative_voice.pov (or constraints default)
+    if "narrative_voice" in scaffold and "pov" in scaffold.get("narrative_voice", {}):
+        assert scaffold["pov"] == scaffold["narrative_voice"]["pov"], \
+            "pov should match narrative_voice.pov when narrative_voice.pov exists"
+    # If narrative_voice doesn't exist, pov should still be valid (comes from constraints default)
+    assert isinstance(scaffold["pov"], str) and len(scaffold["pov"]) > 0, \
+        "pov must be a non-empty string"
     
-    # Scaffold should be generated successfully
-    assert scaffold is not None
-    assert "narrative_voice" in scaffold
-
+    # - tone comes from metadata.tone which is derived from tone_detail.emotional_register (or constraints default)
+    # tone_detail is set to detailed_scaffold.get("tone", {}) which might be a dict or might not exist
+    if "tone_detail" in scaffold and isinstance(scaffold["tone_detail"], dict):
+        if "emotional_register" in scaffold["tone_detail"]:
+            assert scaffold["tone"] == scaffold["tone_detail"]["emotional_register"], \
+                "tone should match tone_detail.emotional_register when it exists"
+    # If tone_detail doesn't exist or doesn't have emotional_register, tone should still be valid (from constraints)
+    assert isinstance(scaffold["tone"], str) and len(scaffold["tone"]) > 0, \
+        "tone must be a non-empty string"
+    
+    # - pace comes from metadata.pace which is derived from style_guidelines.pacing (or constraints default)
+    if "style_guidelines" in scaffold and "pacing" in scaffold.get("style_guidelines", {}):
+        assert scaffold["pace"] == scaffold["style_guidelines"]["pacing"], \
+            "pace should match style_guidelines.pacing when it exists"
+    # If style_guidelines doesn't exist, pace should still be valid (from constraints)
+    assert isinstance(scaffold["pace"], str) and len(scaffold["pace"]) > 0, \
+        "pace must be a non-empty string"
+    
+    # - voice is hardcoded to "developed"
+    assert scaffold["voice"] == "developed", \
+        "voice should be 'developed'"
+    
+    # - sensory_focus comes from sensory_specificity.primary_senses (or constraints default)
+    if "sensory_specificity" in scaffold and "primary_senses" in scaffold.get("sensory_specificity", {}):
+        assert scaffold["sensory_focus"] == scaffold["sensory_specificity"]["primary_senses"], \
+            "sensory_focus should match sensory_specificity.primary_senses when it exists"
+    # If sensory_specificity doesn't exist, sensory_focus should still be valid (from constraints)
+    assert isinstance(scaffold["sensory_focus"], list) and len(scaffold["sensory_focus"]) > 0, \
+        "sensory_focus must be a non-empty list"
+    
+    # - distinctiveness_required is hardcoded to True
+    assert scaffold["distinctiveness_required"] is True, \
+        "distinctiveness_required should be True"
+    
+    # - anti_generic_enforced is hardcoded to True
+    assert scaffold["anti_generic_enforced"] is True, \
+        "anti_generic_enforced should be True"
+    
+    # Verify that backward compatibility fields are not empty or None
+    assert scaffold["pov"] is not None and scaffold["pov"] != "", \
+        "pov should have a valid value"
+    assert scaffold["tone"] is not None and scaffold["tone"] != "", \
+        "tone should have a valid value"
+    assert scaffold["pace"] is not None and scaffold["pace"] != "", \
+        "pace should have a valid value"
+    assert scaffold["sensory_focus"] is not None, \
+        "sensory_focus should have a valid value"

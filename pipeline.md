@@ -1,6 +1,7 @@
 # Pipeline Architecture — Short Story Pipeline
 
-> **See [CONCEPTS.md](CONCEPTS.md) for definitions of distinctiveness, voice development, memorability, and core tools.**
+> **See [CONCEPTS.md](CONCEPTS.md) for definitions of distinctiveness, voice development, memorability, and core tools.**  
+> **See [planning.md](planning.md) for the Product Requirements Document (PRD).**
 
 ## Overview
 The Short Story Pipeline is a modular system that transforms a creative premise into a polished short story draft through five distinct stages. Each stage builds upon the previous one, maintaining a clear separation of concerns and enabling extensibility.
@@ -16,15 +17,14 @@ The Short Story Pipeline is a modular system that transforms a creative premise 
 - Theme or central question (resonant, not clichéd)
 
 **Outputs**:
-- Structured premise object containing:
+- `PremiseModel` (Pydantic model) containing:
   - Core idea (uniqueness score)
-  - Primary character(s) with **distinctive traits, speech patterns, contradictions**
+  - Primary character(s) as `CharacterModel` with **distinctive traits, speech patterns, contradictions**
   - Central theme (avoiding generic messages)
-  - Potential conflicts (specific, not archetypal)
-  - **Character voice markers** (dialect, rhythm, vocabulary quirks)
+  - Validation results (distinctiveness checks)
 
 **Key Functions**:
-- `capture_premise()`: Collects and structures initial creative input
+- `capture_premise()`: Collects and structures initial creative input, returns `PremiseModel`
 - `validate_premise()`: Ensures premise has sufficient detail for outlining
 - `check_distinctiveness()`: Uses [anti-generic filters](CONCEPTS.md#anti-generic-filters) to flag generic elements
 - `identify_voice_markers()`: Captures character speech patterns and narrative voice potential
@@ -38,15 +38,14 @@ The Short Story Pipeline is a modular system that transforms a creative premise 
 - Premise object from Stage 1
 
 **Outputs**:
-- Outline object containing:
-  - Beginning (setup with **distinctive hook**, inciting incident that surprises)
-  - Middle (rising action with **unexpected complications**, not formulaic obstacles)
-  - End (climax with **specific resolution**, avoiding generic endings)
-  - **Memorable moments**: Scenes that create lasting impressions
-  - **Voice opportunities**: Places where character voice can shine
+- `OutlineModel` (Pydantic model) containing:
+  - Genre and framework
+  - Structure (list of act labels)
+  - Acts dictionary (beginning, middle, end)
+  - Detailed outline data stored separately for backward compatibility
 
 **Key Functions**:
-- `generate_outline()`: Creates three-act structure from premise with detailed beats ✅ **Implemented**
+- `generate_outline()`: Creates three-act structure from premise, returns `OutlineModel` ✅ **Implemented**
 - `generate_outline_structure()`: LLM-based outline generation with template fallback ✅ **Implemented**
 - Beat validation: Uses [cliché detection](CONCEPTS.md#cliché-detection-system) to flag predictable beats ✅ **Implemented**
 - Voice opportunities: Automatically identifies scenes where [voice development](CONCEPTS.md#voice-development) can emerge ✅ **Implemented**
@@ -142,12 +141,24 @@ Premise → Outline → Scaffold → Draft → Revised Draft
 
 ```python
 ShortStoryPipeline
-├── premise_capture (Stage 1)
-├── outline_generator (Stage 2)
-├── scaffolding (Stage 3)
-├── drafting (Stage 4)
-└── revision (Stage 5)
+├── premise: Optional[PremiseModel]  # Pydantic model (Stage 1 output)
+├── outline: Optional[OutlineModel]   # Pydantic model (Stage 2 output)
+├── _scaffold_data: Dict[str, Any]   # Scaffold data (Stage 3 output)
+├── _draft_data: Dict[str, Any]      # Draft data (Stage 4 output)
+└── _revised_draft_data: Dict[str, Any]  # Revised draft (Stage 5 output)
 ```
+
+### Data Models
+
+The pipeline uses Pydantic models for type safety and validation:
+
+- **`PremiseModel`**: Story premise with idea, character (`CharacterModel`), theme, and validation
+- **`OutlineModel`**: Story outline with genre, framework, structure, and acts
+- **`CharacterModel`**: Character description with name, description, quirks, contradictions
+- **`StoryMetadata`**: Separated metadata (tone, pace, pov, distinctiveness scores)
+- **`StoryModel`**: Complete story model (used for final story creation)
+
+All models are defined in `src/shortstory/models.py` and provide automatic validation, type safety, and clear structure.
 
 ## Constraints & Validation
 
@@ -161,10 +172,34 @@ ShortStoryPipeline
 
 ## Usage Pattern
 
-1. Initialize pipeline with configuration
-2. Run stages sequentially or individually
-3. Validate outputs at each stage
-4. Export final revised draft
+```python
+from src.shortstory.pipeline import ShortStoryPipeline
+from src.shortstory.models import PremiseModel, OutlineModel
+
+# Initialize pipeline
+pipeline = ShortStoryPipeline(max_word_count=7500, genre="Science Fiction")
+
+# Stage 1: Capture premise (returns PremiseModel)
+premise = pipeline.capture_premise(
+    idea="A scientist discovers time is a loop",
+    character={"name": "Dr. Chen", "description": "Brilliant but obsessive"},
+    theme="The cost of knowledge"
+)
+
+# Stage 2: Generate outline (returns OutlineModel)
+outline = pipeline.generate_outline(genre="Science Fiction")
+
+# Stage 3: Scaffold
+scaffold = pipeline.scaffold()
+
+# Stage 4: Draft
+draft = pipeline.draft()
+
+# Stage 5: Revise
+revised = pipeline.revise()
+```
+
+**Note**: The pipeline now uses Pydantic models (`PremiseModel`, `OutlineModel`, `CharacterModel`) for type safety and automatic validation. These models provide better IDE support, catch errors early, and ensure data consistency throughout the pipeline.
 
 ## Integration Points
 

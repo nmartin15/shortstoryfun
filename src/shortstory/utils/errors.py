@@ -6,8 +6,11 @@ Provides structured error responses and custom exception classes.
 
 import logging
 import traceback
-from typing import Optional, Dict, Any
-from flask import jsonify, request
+from typing import Optional, Dict, Any, TYPE_CHECKING
+from flask import jsonify
+
+if TYPE_CHECKING:
+    from flask import Request
 
 logger = logging.getLogger(__name__)
 
@@ -106,9 +109,90 @@ class MissingDependencyError(APIError):
         )
 
 
+class StorageError(APIError):
+    """Base exception for storage-related errors."""
+    
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            error_code="STORAGE_ERROR",
+            status_code=500,
+            details=details
+        )
+
+
+class DataIntegrityError(StorageError):
+    """Raised when data integrity constraints are violated."""
+    
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, details)
+        self.error_code = "DATA_INTEGRITY_ERROR"
+
+
+class DatabaseConnectionError(StorageError):
+    """Raised when database connection or operational errors occur."""
+    
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, details)
+        self.error_code = "DATABASE_CONNECTION_ERROR"
+
+
+def parse_error_response(response_text: str, status_code: int) -> Dict[str, Any]:
+    """
+    Parse error response from API, handling both JSON and plain text.
+    
+    Provides consistent error parsing for better error reporting and debugging.
+    
+    Args:
+        response_text: Response body text
+        status_code: HTTP status code
+        
+    Returns:
+        Dict with parsed error information:
+        {
+            "error": str,
+            "error_code": str,
+            "details": Dict (optional),
+            "raw_text": str (if JSON parsing failed)
+        }
+    """
+    import json
+    
+    error_info = {
+        "error": f"API request failed with status {status_code}",
+        "error_code": f"HTTP_{status_code}",
+        "status_code": status_code
+    }
+    
+    if not response_text:
+        error_info["error"] = f"API request failed with status {status_code} (empty response)"
+        return error_info
+    
+    # Try to parse as JSON first
+    try:
+        error_data = json.loads(response_text)
+        if isinstance(error_data, dict):
+            # Extract standard error fields
+            error_info["error"] = error_data.get("error", error_info["error"])
+            error_info["error_code"] = error_data.get("error_code", error_info["error_code"])
+            if "details" in error_data:
+                error_info["details"] = error_data["details"]
+            # Include full response if it's an error object
+            if "error" in error_data or "error_code" in error_data:
+                error_info["full_response"] = error_data
+    except (json.JSONDecodeError, ValueError):
+        # Not JSON, use text directly
+        error_info["raw_text"] = response_text[:1000]  # Limit to 1000 chars
+        if len(response_text) > 1000:
+            error_info["raw_text_truncated"] = True
+    
+    return error_info
+
+
 def create_error_response(
     error: Exception,
-    include_traceback: bool = False
+    include_traceback: bool = False,
+    request_context: Optional['Request'] = None
 ) -> tuple:
     """
     Create a standardized error response.
@@ -116,17 +200,22 @@ def create_error_response(
     Args:
         error: Exception instance
         include_traceback: Whether to include traceback in response (for debugging)
+        request_context: Optional Flask request object for logging context
     
     Returns:
         Tuple of (json_response, status_code)
     """
+    # Extract request info if available
+    request_path = request_context.path if request_context else None
+    request_method = request_context.method if request_context else None
+    
     # Log the error
     logger.error(
         f"Error: {type(error).__name__}: {str(error)}",
         exc_info=True,
         extra={
-            "path": request.path if request else None,
-            "method": request.method if request else None,
+            "path": request_path,
+            "method": request_method,
         }
     )
     
@@ -171,17 +260,20 @@ def register_error_handlers(app, debug: bool = False):
         app: Flask application instance
         debug: Whether to include tracebacks in error responses
     """
+    from flask import request  # Import here to avoid circular dependency
+    
     @app.errorhandler(APIError)
     def handle_api_error(error: APIError):
         """Handle APIError exceptions."""
-        return create_error_response(error, include_traceback=debug)
+        return create_error_response(error, include_traceback=debug, request_context=request)
     
     @app.errorhandler(404)
     def handle_not_found(error):
         """Handle 404 errors."""
         return create_error_response(
             NotFoundError("Resource", request.path),
-            include_traceback=debug
+            include_traceback=debug,
+            request_context=request
         )
     
     @app.errorhandler(405)
@@ -197,16 +289,16 @@ def register_error_handlers(app, debug: bool = False):
         """Handle 429 Rate Limit errors."""
         return create_error_response(
             RateLimitError(),
-            include_traceback=debug
+            include_traceback=debug,
+            request_context=request
         )
     
     @app.errorhandler(500)
     def handle_internal_error(error):
         """Handle 500 Internal Server errors."""
-        return create_error_response(error, include_traceback=debug)
+        return create_error_response(error, include_traceback=debug, request_context=request)
     
     @app.errorhandler(Exception)
     def handle_generic_exception(error: Exception):
         """Handle all other exceptions."""
-        return create_error_response(error, include_traceback=debug)
-
+        return create_error_response(error, include_traceback=debug, request_context=request)

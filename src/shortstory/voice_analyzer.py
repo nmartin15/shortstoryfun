@@ -12,6 +12,10 @@ from typing import Dict, List, Optional, Tuple, Set
 from collections import defaultdict, Counter
 import statistics
 
+# Voice consistency thresholds
+CONSISTENCY_THRESHOLD = 0.7  # Minimum consistency score for acceptable voice consistency
+GOOD_CONSISTENCY_THRESHOLD = 0.8  # Threshold for good overall consistency
+
 
 class DialogueExtractor:
     """Extracts dialogue from story text and identifies speakers."""
@@ -633,7 +637,7 @@ class CharacterVoiceAnalyzer:
         # Check consistency for each character
         for char_name, analysis in character_analyses.items():
             consistency = analysis["consistency"]["consistency_score"]
-            if consistency < 0.7:
+            if consistency < CONSISTENCY_THRESHOLD:
                 suggestions.append(
                     f"{char_name}'s voice is inconsistent across dialogue instances. "
                     f"Review dialogue to maintain consistent speech patterns."
@@ -818,10 +822,10 @@ class VoiceConsistencyChecker:
         # Generate summary
         characters_with_issues = sum(
             1 for comp in character_comparisons.values()
-            if comp["consistency_score"] < 0.7 or comp["issues"]
+            if comp["consistency_score"] < CONSISTENCY_THRESHOLD or comp["issues"]
         )
         
-        if overall_score >= 0.8:
+        if overall_score >= GOOD_CONSISTENCY_THRESHOLD:
             overall_status = "consistent"
         elif overall_score >= 0.6:
             overall_status = "minor_issues"
@@ -992,7 +996,7 @@ class VoiceConsistencyChecker:
                 "Significant voice inconsistencies detected between draft and revision. "
                 "Review character dialogue to ensure voices remain consistent."
             )
-        elif overall_score < 0.8:
+        elif overall_score < GOOD_CONSISTENCY_THRESHOLD:
             suggestions.append(
                 "Minor voice inconsistencies detected. Review character dialogue "
                 "to maintain consistent speech patterns across draft stages."
@@ -1000,7 +1004,7 @@ class VoiceConsistencyChecker:
         
         # Character-specific suggestions
         for char_name, comparison in character_comparisons.items():
-            if comparison["consistency_score"] < 0.7:
+            if comparison["consistency_score"] < CONSISTENCY_THRESHOLD:
                 if comparison["issues"]:
                     suggestions.append(
                         f"{char_name}: {comparison['issues'][0]}"

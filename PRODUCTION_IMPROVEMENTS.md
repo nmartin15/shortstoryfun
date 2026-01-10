@@ -1,5 +1,8 @@
 # Production Improvements Summary
 
+> **See [DEPLOYMENT.md](DEPLOYMENT.md) for deployment instructions.**  
+> **See [BACKGROUND_JOBS.md](BACKGROUND_JOBS.md) for background job processing.**
+
 This document summarizes the production-ready improvements made to the Short Story Pipeline application.
 
 ## 1. Enhanced Error Handling
@@ -103,6 +106,7 @@ New/Updated variables:
 - `FLASK_DEBUG`: Debug mode flag
 - `REDIS_URL`: Redis connection for rate limiting
 - `HOST`/`PORT`: Server binding
+- `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
 - Gunicorn configuration variables
 
 ### Configuration Files
@@ -118,12 +122,28 @@ New/Updated variables:
 - Error details hidden from users in production
 - Rate limiting to prevent abuse
 - Proper error handling to avoid information leakage
+- **CORS hardening**: Restricted to `/api/*` routes only with explicit origin allowlist
+
+### CORS Configuration
+
+CORS (Cross-Origin Resource Sharing) has been hardened for better security:
+
+- **Route-specific**: CORS only applies to `/api/*` routes, not the entire application
+- **Explicit allowlist**: Only origins specified in `CORS_ALLOWED_ORIGINS` are allowed
+- **Secure default**: If not configured, CORS is disabled (no cross-origin requests)
+- **Environment-based**: Configure via `CORS_ALLOWED_ORIGINS` environment variable (comma-separated list)
+
+Example configuration:
+```bash
+CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+```
 
 ### Best Practices
 
 - Environment-based configuration
 - Secure defaults
 - Logging without sensitive data exposure
+- Explicit CORS origin allowlist (never use wildcards in production)
 
 ## Usage
 

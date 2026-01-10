@@ -1,5 +1,7 @@
 # Google Gemini API Setup — Quick Start
 
+> **See [README.md](README.md) for general setup instructions.**
+
 Simple setup—just need an API key!
 
 ## Quick Setup (2 steps)
@@ -61,15 +63,20 @@ You should see:
 
 ## Model Options
 
-Default model is `gemini-pro`. To use a different model:
+Default model is `gemini-2.5-flash`. To use a different model:
 
 ```bash
-export LLM_MODEL=gemini-pro-vision  # or other Gemini models
+export LLM_MODEL=gemini-1.5-pro  # or other Gemini models
 ```
 
-Available models:
-- `gemini-pro` (default) - Best for text generation
-- `gemini-pro-vision` - Supports images (if you add image features later)
+Available models (text-only, no image support):
+- `gemini-2.5-flash` (default) - Fast and efficient for text generation
+- `gemini-2.0-flash-exp` - Experimental flash model
+- `gemini-1.5-pro` - Higher quality, slower
+- `gemini-1.5-flash` - Balanced performance
+- `gemini-1.0-pro` - Legacy model
+
+Note: This application is text-only. Image/vision models are not supported.
 
 ## Why Google Gemini API?
 

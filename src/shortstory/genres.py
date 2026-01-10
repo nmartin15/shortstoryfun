@@ -13,7 +13,11 @@ IMPORTANT: Genres provide STRUCTURE, not FORMULAS.
 See CONCEPTS.md for core principles of distinctiveness and memorability.
 """
 
-GENRE_CONFIGS = {
+import functools
+from typing import Dict, Any, List, Optional
+
+# Primary genre configurations (single source of truth)
+PRIMARY_GENRE_CONFIGS: Dict[str, Dict[str, Any]] = {
     "Horror": {
         "framework": "tension_escalation",
         "outline": ["setup", "rising dread", "twist ending"],
@@ -32,36 +36,6 @@ GENRE_CONFIGS = {
             "pace": "moderate",
             "pov_preference": "first_or_third",
             "sensory_focus": ["sight", "emotion", "intimacy"]
-        }
-    },
-    "Crime / Noir": {
-        "framework": "mystery_arc",
-        "outline": ["crime setup", "investigation", "resolution/failure"],
-        "constraints": {
-            "tone": "gritty",
-            "voice": "detached",
-            "pov_preference": "first_or_limited",
-            "sensory_focus": ["sight", "detail", "atmosphere"]
-        }
-    },
-    "Speculative": {
-        "framework": "world_building_arc",
-        "outline": ["world setup", "conflict", "resolution/implication"],
-        "constraints": {
-            "tone": "imaginative",
-            "pace": "compressed",
-            "pov_preference": "third",
-            "sensory_focus": ["sight", "world_detail", "concept"]
-        }
-    },
-    "Literary": {
-        "framework": "character_arc",
-        "outline": ["character introduction", "internal conflict", "transformation"],
-        "constraints": {
-            "tone": "nuanced",
-            "pace": "deliberate",
-            "pov_preference": "third_limited",
-            "sensory_focus": ["detail", "emotion", "subtext"]
         }
     },
     "Thriller": {
@@ -86,10 +60,49 @@ GENRE_CONFIGS = {
     }
 }
 
+# Map alternative/legacy names to primary genre names
+GENRE_ALIASES: Dict[str, str] = {
+    "Crime / Noir": "Thriller",  # Noir is similar to Thriller
+    "Speculative": "General Fiction",  # Speculative is a broad category
+    "Literary": "General Fiction",  # Literary is a style, not a distinct genre structure
+}
 
-def get_genre_config(genre_name):
+# Combine primary configs with aliases for backward compatibility
+GENRE_CONFIGS: Dict[str, Dict[str, Any]] = {**PRIMARY_GENRE_CONFIGS}
+for alias, primary_name in GENRE_ALIASES.items():
+    if primary_name in PRIMARY_GENRE_CONFIGS:
+        GENRE_CONFIGS[alias] = PRIMARY_GENRE_CONFIGS[primary_name]
+
+# Valid framework types (derived from actual genre configs)
+VALID_FRAMEWORKS = {
+    "tension_escalation",
+    "emotional_arc",
+    "suspense_arc",
+    "narrative_arc",
+    "mystery_arc",  # Used by Crime / Noir alias
+}
+
+# Valid POV preference values
+VALID_POV_PREFERENCES = {
+    "first_or_limited",
+    "first_or_third",
+    "third_limited",
+    "flexible",
+    "third",
+}
+
+
+@functools.lru_cache(maxsize=32)
+def get_genre_config(genre_name: Optional[str]) -> Optional[Dict[str, Any]]:
     """
     Get configuration for a specific genre.
+    
+    This function is cached to avoid redundant lookups. Since genre configs
+    are static and loaded from memory, caching provides minimal overhead
+    but ensures consistent performance under load.
+    
+    Supports both primary genre names and aliases. Aliases reference
+    primary configurations to maintain a single source of truth.
     
     Args:
         genre_name: Name of the genre (case-insensitive)
@@ -99,28 +112,33 @@ def get_genre_config(genre_name):
     """
     # Handle None or empty string
     if not genre_name:
-        return GENRE_CONFIGS.get("General Fiction")
+        return PRIMARY_GENRE_CONFIGS.get("General Fiction")
     
-    # Case-insensitive lookup
-    for key, value in GENRE_CONFIGS.items():
+    # Case-insensitive lookup in primary configs first
+    for key, value in PRIMARY_GENRE_CONFIGS.items():
         if key.lower() == genre_name.lower():
             return value
     
+    # Check aliases
+    for alias, primary_name in GENRE_ALIASES.items():
+        if alias.lower() == genre_name.lower():
+            return PRIMARY_GENRE_CONFIGS.get(primary_name)
+    
     # Default to General Fiction if not found
-    return GENRE_CONFIGS.get("General Fiction")
+    return PRIMARY_GENRE_CONFIGS.get("General Fiction")
 
 
-def get_available_genres():
+def get_available_genres() -> List[str]:
     """
     Get list of available genre names.
     
     Returns:
-        List of genre names
+        List of genre names (strings)
     """
     return list(GENRE_CONFIGS.keys())
 
 
-def get_framework(genre_name):
+def get_framework(genre_name: str) -> Optional[str]:
     """
     Get framework type for a genre.
     
@@ -134,7 +152,7 @@ def get_framework(genre_name):
     return config.get("framework") if config else None
 
 
-def get_outline_structure(genre_name):
+def get_outline_structure(genre_name: str) -> Optional[List[str]]:
     """
     Get outline structure for a genre.
     
@@ -148,7 +166,7 @@ def get_outline_structure(genre_name):
     return config.get("outline") if config else None
 
 
-def get_constraints(genre_name):
+def get_constraints(genre_name: str) -> Optional[Dict[str, Any]]:
     """
     Get constraints for a genre.
     

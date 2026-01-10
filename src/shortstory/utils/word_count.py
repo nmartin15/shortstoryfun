@@ -4,13 +4,15 @@ Word count validation and enforcement.
 Enforces the ≤ 7500 word limit while maximizing impact per word.
 """
 
+from typing import Optional, Tuple
+
 MAX_WORD_COUNT = 7500
 
 
 class WordCountError(Exception):
     """Raised when word count exceeds maximum."""
     
-    def __init__(self, word_count, max_words):
+    def __init__(self, word_count: int, max_words: int) -> None:
         """
         Initialize error with word count details.
         
@@ -31,7 +33,7 @@ class WordCountValidator:
     The philosophy is to maximize impact per word, not just stay under limit.
     """
     
-    def __init__(self, max_words=MAX_WORD_COUNT):
+    def __init__(self, max_words: int = MAX_WORD_COUNT) -> None:
         """
         Initialize validator.
         
@@ -40,7 +42,7 @@ class WordCountValidator:
         """
         self.max_words = max_words
     
-    def count_words(self, text):
+    def count_words(self, text: Optional[str]) -> int:
         """
         Count words in text.
         
@@ -54,20 +56,18 @@ class WordCountValidator:
             Word count as integer (0 for None or empty strings)
         
         Raises:
-            TypeError: If text is not a string, None, or empty string
+            TypeError: If text is not a string (after None/empty handling)
         """
-        if text is None:
+        if text is None or text == "":
             return 0
         if not isinstance(text, str):
             raise TypeError(f"count_words() expects a string, got {type(text).__name__}")
-        if not text:
-            return 0
         
         # Split on whitespace and filter out empty strings
         words = [w for w in text.split() if w.strip()]
         return len(words)
     
-    def validate(self, text, raise_error=True):
+    def validate(self, text: str, raise_error: bool = True) -> Tuple[int, bool]:
         """
         Validate word count against maximum.
         
@@ -86,7 +86,7 @@ class WordCountValidator:
         
         return word_count, is_valid
     
-    def get_remaining_words(self, text):
+    def get_remaining_words(self, text: str) -> int:
         """
         Get remaining words available.
         
@@ -100,7 +100,7 @@ class WordCountValidator:
         remaining = max(0, self.max_words - word_count)
         return remaining
     
-    def check_impact_ratio(self, text, target_words=None):
+    def check_impact_ratio(self, text: str, target_words: Optional[int] = None) -> float:
         """
         Calculate impact ratio (words used vs. available).
         
@@ -125,4 +125,3 @@ class WordCountValidator:
             return 0.0  # Over budget = no efficiency
         
         return word_count / target_words
-

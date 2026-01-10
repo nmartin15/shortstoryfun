@@ -128,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTemplates();
     setupRevisionFeatures();
     setupFormSubmission();
+    setupCharacterCounters();
     
     // Debug: Verify template setup after initialization
     setTimeout(() => {
@@ -170,6 +171,12 @@ function setupFormSubmission() {
         return;
     }
     
+    // Validate idea length (max 2000 characters)
+    if (idea.length > 2000) {
+        showError(`Story idea is too long (${idea.length} characters). Maximum length is 2000 characters. Please provide a more concise premise.`, 'IDEA_TOO_LONG');
+        return;
+    }
+    
     // Parse character (try JSON, fallback to plain text)
     let character = characterInput;
     if (characterInput) {
@@ -180,6 +187,18 @@ function setupFormSubmission() {
         }
     } else {
         character = {};
+    }
+    
+    // Validate character description length (max 2000 characters)
+    if (character && character.description && character.description.length > 2000) {
+        showError(`Character description is too long (${character.description.length} characters). Maximum length is 2000 characters.`, 'CHARACTER_TOO_LONG');
+        return;
+    }
+    
+    // Validate theme length (max 1000 characters)
+    if (theme && theme.length > 1000) {
+        showError(`Theme is too long (${theme.length} characters). Maximum length is 1000 characters.`, 'THEME_TOO_LONG');
+        return;
     }
     
     showLoading();
@@ -215,9 +234,9 @@ function setupFormSubmission() {
         // Mark final step as complete
         updateProgressStep('step-revise', true);
         
-        currentStoryId = data.story_id;
+        currentStoryId = data.id || data.story_id;
         const storyEditor = document.getElementById('story-editor');
-        storyEditor.value = data.story;
+        storyEditor.value = data.body || data.text || data.story || '';
         
         // Auto-resize textarea to fit content (with max limit for very long stories)
         storyEditor.style.height = 'auto';
@@ -267,6 +286,65 @@ function setupFormSubmission() {
         }, 500);
     }
     });
+}
+
+/**
+ * Set up character counters for form fields.
+ * Displays real-time character count and max limits for idea, character, and theme fields.
+ */
+function setupCharacterCounters() {
+    const ideaField = document.getElementById('idea');
+    const characterField = document.getElementById('character');
+    const themeField = document.getElementById('theme');
+    
+    // Create counter elements
+    const ideaCounter = document.createElement('div');
+    ideaCounter.className = 'text-xs text-gray-500 mt-1 text-right';
+    ideaCounter.id = 'idea-counter';
+    ideaField.parentElement.appendChild(ideaCounter);
+    
+    const characterCounter = document.createElement('div');
+    characterCounter.className = 'text-xs text-gray-500 mt-1 text-right';
+    characterCounter.id = 'character-counter';
+    characterField.parentElement.appendChild(characterCounter);
+    
+    const themeCounter = document.createElement('div');
+    themeCounter.className = 'text-xs text-gray-500 mt-1 text-right';
+    themeCounter.id = 'theme-counter';
+    themeField.parentElement.appendChild(themeCounter);
+    
+    // Update counter function
+    function updateCounter(field, counter, maxLength) {
+        const length = field.value.length;
+        const remaining = maxLength - length;
+        const isOverLimit = length > maxLength;
+        
+        counter.textContent = `${length.toLocaleString()} / ${maxLength.toLocaleString()} characters`;
+        counter.className = isOverLimit 
+            ? 'text-xs text-red-500 mt-1 text-right font-semibold' 
+            : remaining < 100 
+                ? 'text-xs text-yellow-500 mt-1 text-right' 
+                : 'text-xs text-gray-500 mt-1 text-right';
+    }
+    
+    // Set up event listeners
+    if (ideaField) {
+        ideaField.addEventListener('input', () => updateCounter(ideaField, ideaCounter, 2000));
+        ideaField.addEventListener('paste', () => setTimeout(() => updateCounter(ideaField, ideaCounter, 2000), 10));
+        updateCounter(ideaField, ideaCounter, 2000); // Initial update
+    }
+    
+    if (characterField) {
+        characterField.addEventListener('input', () => updateCounter(characterField, characterCounter, 2000));
+        characterField.addEventListener('paste', () => setTimeout(() => updateCounter(characterField, characterCounter, 2000), 10));
+        updateCounter(characterField, characterCounter, 2000); // Initial update
+    }
+    
+    if (themeField) {
+        themeField.addEventListener('input', () => updateCounter(themeField, themeCounter, 1000));
+        themeField.addEventListener('paste', () => setTimeout(() => updateCounter(themeField, themeCounter, 1000), 10));
+        updateCounter(themeField, themeCounter, 1000); // Initial update
+    }
 }
 
 // Save button
@@ -830,7 +908,7 @@ function setupRevisionFeatures() {
             const data = await response.json();
             
             const storyEditor = document.getElementById('story-editor');
-            storyEditor.value = data.story;
+            storyEditor.value = data.body || data.text || '';
             
             // Auto-resize textarea to fit content
             storyEditor.style.height = 'auto';
@@ -1028,13 +1106,15 @@ function displayComparison(data) {
     // Ensure all values are properly escaped, especially type fields which could contain user input
     const v1Version = escapeHtml(String(v1.version || ''));
     const v1Type = escapeHtml(String(v1.type || ''));
-    const v1Text = escapeHtml(String(v1.text || '').substring(0, 1000));
+    const v1TextRaw = v1.body || v1.text || '';
+    const v1Text = escapeHtml(String(v1TextRaw).substring(0, 1000));
     const v1WordCount = escapeHtml(String(v1.word_count || 0));
     const v1Timestamp = escapeHtml(new Date(v1.timestamp || Date.now()).toLocaleString());
     
     const v2Version = escapeHtml(String(v2.version || ''));
     const v2Type = escapeHtml(String(v2.type || ''));
-    const v2Text = escapeHtml(String(v2.text || '').substring(0, 1000));
+    const v2TextRaw = v2.body || v2.text || '';
+    const v2Text = escapeHtml(String(v2TextRaw).substring(0, 1000));
     const v2WordCount = escapeHtml(String(v2.word_count || 0));
     const v2Timestamp = escapeHtml(new Date(v2.timestamp || Date.now()).toLocaleString());
     
@@ -1068,12 +1148,12 @@ function displayComparison(data) {
         <div class="comparison-texts">
             <div class="comparison-version">
                 <h4>Version ${v1Version} (${v1Type})</h4>
-                <div class="version-text">${v1Text}${(v1.text || '').length > 1000 ? '...' : ''}</div>
+                <div class="version-text">${v1Text}${v1TextRaw.length > 1000 ? '...' : ''}</div>
                 <div class="version-meta">${v1WordCount} words | ${v1Timestamp}</div>
             </div>
             <div class="comparison-version">
                 <h4>Version ${v2Version} (${v2Type})</h4>
-                <div class="version-text">${v2Text}${(v2.text || '').length > 1000 ? '...' : ''}</div>
+                <div class="version-text">${v2Text}${v2TextRaw.length > 1000 ? '...' : ''}</div>
                 <div class="version-meta">${v2WordCount} words | ${v2Timestamp}</div>
             </div>
         </div>
@@ -1205,7 +1285,7 @@ async function loadStory(storyId) {
         
         currentStoryId = storyId;
         const storyEditor = document.getElementById('story-editor');
-        storyEditor.value = data.story;
+        storyEditor.value = data.body || data.text || '';
         
         // Auto-resize textarea to fit content
         storyEditor.style.height = 'auto';

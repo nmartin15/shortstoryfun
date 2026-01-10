@@ -19,6 +19,8 @@ from .llm_constants import (
     TOKEN_BUFFER_ADDITION,
     CHARS_PER_TOKEN_ESTIMATE,
     TARGET_WORD_COUNT_RATIO,
+    GEMINI_MAX_OUTPUT_TOKENS,
+    MIN_TOKENS_FOR_FULL_STORY,
 )
 
 # Lazy imports for backward compatibility (avoid circular imports)
@@ -230,9 +232,10 @@ def _continue_story_if_needed(
         try:
             # Allocate tokens aggressively, but within overall estimated_max_tokens
             # Note: Provider-specific max token limits should be handled by the provider
-            continuation_tokens_needed = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 1.3)  # More buffer
-            allocated_tokens = min(estimated_max_tokens, continuation_tokens_needed)
-            allocated_tokens = max(DEFAULT_MIN_TOKENS, allocated_tokens)  # Ensure a minimum reasonable output
+            continuation_tokens_needed = int(remaining_words * TOKENS_PER_WORD_ESTIMATE * 1.5)  # More aggressive buffer
+            # For continuation, we can use more tokens since we're actively trying to reach minimum
+            allocated_tokens = min(GEMINI_MAX_OUTPUT_TOKENS, continuation_tokens_needed)
+            allocated_tokens = max(MIN_TOKENS_FOR_FULL_STORY, allocated_tokens)  # Ensure minimum for full story
 
             logger.info(
                 f"Continuation attempt {attempt + 1}: current={word_count} words, need={remaining_words} more words, "
@@ -486,10 +489,16 @@ def generate_story_draft(
         max_words=max_words,
     )
     
-    user_prompt, story_min_words, story_max_words, estimated_max_tokens = build_story_user_prompt(params)
+    user_prompt, story_min_words, story_max_words, target_words = build_story_user_prompt(params)
+    
+    # Calculate max_tokens from target_words (convert words to tokens)
+    # target_words is a word count, but we need tokens for the LLM API
+    estimated_max_tokens = int(target_words * TOKENS_PER_WORD_ESTIMATE * TOKEN_BUFFER_MULTIPLIER) + TOKEN_BUFFER_ADDITION
+    estimated_max_tokens = min(estimated_max_tokens, GEMINI_MAX_OUTPUT_TOKENS)
+    estimated_max_tokens = max(estimated_max_tokens, MIN_TOKENS_FOR_FULL_STORY)
     
     # Generate initial draft
-    logger.info(f"Generating story draft: target_words={int(max_words * TARGET_WORD_COUNT_RATIO)}, max_words={max_words}")
+    logger.info(f"Generating story draft: target_words={target_words}, max_words={max_words}, max_tokens={estimated_max_tokens}")
     story_text = client.generate(
         prompt=user_prompt,
         system_prompt=system_prompt,
@@ -547,15 +556,21 @@ def revise_story_text(
     # Build prompts
     system_prompt = build_revision_system_prompt()
     
-    user_prompt, story_min_words, story_max_words, estimated_max_tokens = build_revision_user_prompt(
+    user_prompt, story_min_words, story_max_words, target_words = build_revision_user_prompt(
         text=text,
         revision_notes=revision_notes,
         current_words=current_words,
         max_words=max_words,
     )
     
+    # Calculate max_tokens from target_words (convert words to tokens)
+    # target_words is a word count, but we need tokens for the LLM API
+    estimated_max_tokens = int(target_words * TOKENS_PER_WORD_ESTIMATE * TOKEN_BUFFER_MULTIPLIER) + TOKEN_BUFFER_ADDITION
+    estimated_max_tokens = min(estimated_max_tokens, GEMINI_MAX_OUTPUT_TOKENS)
+    estimated_max_tokens = max(estimated_max_tokens, MIN_TOKENS_FOR_FULL_STORY)
+    
     # Generate revision
-    logger.info(f"Revising story: current_words={current_words}, max_words={max_words}")
+    logger.info(f"Revising story: current_words={current_words}, max_words={max_words}, target_words={target_words}, max_tokens={estimated_max_tokens}")
     revised_text = client.generate(
         prompt=user_prompt,
         system_prompt=system_prompt,

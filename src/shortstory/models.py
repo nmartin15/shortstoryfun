@@ -42,7 +42,7 @@ class RevisionEntry(BaseModel):
     version: int
     body: str
     word_count: int
-    type: str = Field(..., regex="^(draft|revised)$")
+    type: str = Field(..., pattern="^(draft|revised)$")
     timestamp: str
 
 
@@ -62,34 +62,34 @@ class StoryModel(BaseModel):
     This is the canonical structure for all stories in the system.
     All story creation and storage should use this model.
     """
-    id: str = Field(..., regex="^story_[a-f0-9]{8}$", description="Unique story identifier")
-    premise: PremiseModel
-    outline: OutlineModel
-    genre: str
-    genre_config: Dict[str, Any]
-    scaffold: Optional[Dict[str, Any]] = None
+    id: str = Field(..., pattern="^story_[a-f0-9]{8}$", description="Unique story identifier")
+    premise: PremiseModel = Field(..., description="Story premise containing idea, character, and theme")
+    outline: OutlineModel = Field(..., description="Story outline structure with key plot points")
+    genre: str = Field(..., description="The primary genre of the story, e.g., 'Horror', 'Romance', 'Thriller'")
+    genre_config: Dict[str, Any] = Field(..., description="Configuration specific to the story's genre, including framework, outline structure, and constraints (tone, pace, POV preferences)")
+    scaffold: Optional[Dict[str, Any]] = Field(None, description="Detailed voice profiles, conflict mapping, and style guidelines generated during the scaffolding stage. Contains narrative voice, character voices, tone details, and style guidelines.")
     
     # Content fields
-    body: str = Field(..., description="Pure narrative text without metadata")
-    metadata: StoryMetadata = Field(default_factory=StoryMetadata)
+    body: str = Field(..., description="Pure narrative text without metadata. This is the actual story content.")
+    metadata: StoryMetadata = Field(default_factory=StoryMetadata, description="Separated metadata for story, including tone, pace, point-of-view, and distinctiveness scores")
     
     # Word count fields
-    word_count: int = Field(..., ge=0, description="Current word count")
-    max_words: int = Field(default=7500, ge=1, description="Maximum allowed word count")
+    word_count: int = Field(..., ge=0, description="Current word count of the 'body' field. Only counts the narrative text, not metadata.")
+    max_words: int = Field(default=7500, ge=1, description="Maximum allowed word count for the story. Used for validation and generation limits.")
     
     # Draft and revision fields
-    draft: Optional[Dict[str, Any]] = None
-    revised_draft: Optional[Dict[str, Any]] = None
-    revision_history: List[RevisionEntry] = Field(default_factory=list)
-    current_revision: int = Field(default=1, ge=1)
+    draft: Optional[Dict[str, Any]] = Field(None, description="The initial draft of the story, typically containing text and word count. Generated during the drafting stage.")
+    revised_draft: Optional[Dict[str, Any]] = Field(None, description="The revised version of the story draft, after language sharpening and distinctiveness improvements. Generated during the revision stage.")
+    revision_history: List[RevisionEntry] = Field(default_factory=list, description="A chronological list of all revisions, including drafts and revised versions. Each entry contains the revision text, timestamp, and revision number.")
+    current_revision: int = Field(default=1, ge=1, description="The version number of the currently active or displayed story revision. Increments with each new revision.")
     
     # Timestamps
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    saved_at: Optional[str] = None
+    created_at: Optional[str] = Field(None, description="ISO 8601 formatted datetime string of when the story was first created")
+    updated_at: Optional[str] = Field(None, description="ISO 8601 formatted datetime string of the last time the story was updated (any field changed)")
+    saved_at: Optional[str] = Field(None, description="ISO 8601 formatted datetime string of the last time the story was explicitly saved to storage")
     
     # Legacy fields (for backward compatibility)
-    text: Optional[str] = None  # Generated on demand from body + metadata
+    text: Optional[str] = Field(None, description="Legacy field: composite markdown text including body and metadata, generated on demand. Use 'body' and 'metadata' fields instead.")
     
     @validator('word_count')
     def validate_word_count(cls, v, values):
@@ -198,14 +198,14 @@ def create_story(
     
     Args:
         story_id: Unique story identifier
-        premise: Premise dictionary
-        outline: Outline dictionary
+        premise: Premise dictionary or PremiseModel
+        outline: Outline dictionary or OutlineModel
         genre: Genre name
         genre_config: Genre configuration
         body: Pure narrative text
         word_count: Word count of body
         scaffold: Optional scaffold data
-        metadata: Optional metadata
+        metadata: Optional metadata dictionary or StoryMetadata
         draft: Optional draft data
         revised_draft: Optional revised draft data
         max_words: Maximum word count (default: 7500)
@@ -214,6 +214,26 @@ def create_story(
         Validated StoryModel instance
     """
     from datetime import datetime
+    
+    # Convert premise to PremiseModel if needed
+    if isinstance(premise, dict):
+        premise_model = PremiseModel(**premise)
+    else:
+        premise_model = premise
+    
+    # Convert outline to OutlineModel if needed
+    if isinstance(outline, dict):
+        outline_model = OutlineModel(**outline)
+    else:
+        outline_model = outline
+    
+    # Convert metadata to StoryMetadata if needed
+    if isinstance(metadata, dict):
+        metadata_model = StoryMetadata(**metadata)
+    elif metadata is None:
+        metadata_model = StoryMetadata()
+    else:
+        metadata_model = metadata
     
     # Build revision history
     revision_history = []
@@ -234,25 +254,22 @@ def create_story(
             timestamp=datetime.now().isoformat()
         ))
     
-    # Build story data
-    story_data = {
-        'id': story_id,
-        'premise': premise,
-        'outline': outline,
-        'genre': genre,
-        'genre_config': genre_config,
-        'body': body,
-        'word_count': word_count,
-        'max_words': max_words,
-        'scaffold': scaffold or {},
-        'metadata': metadata or {},
-        'draft': draft,
-        'revised_draft': revised_draft,
-        'revision_history': [rev.dict() for rev in revision_history],
-        'current_revision': len(revision_history) if revision_history else 1,
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
-    }
-    
-    return StoryModel.from_dict(story_data)
-
+    # Build story model directly
+    return StoryModel(
+        id=story_id,
+        premise=premise_model,
+        outline=outline_model,
+        genre=genre,
+        genre_config=genre_config,
+        body=body,
+        word_count=word_count,
+        max_words=max_words,
+        scaffold=scaffold or {},
+        metadata=metadata_model,
+        draft=draft,
+        revised_draft=revised_draft,
+        revision_history=revision_history,
+        current_revision=len(revision_history) if revision_history else 1,
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat()
+    )

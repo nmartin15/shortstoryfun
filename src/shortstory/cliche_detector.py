@@ -1,150 +1,14 @@
 """
-Cliché Detection System
-
-Comprehensive system for detecting and suggesting replacements for:
-- Generic phrases and stock descriptions
-- Predictable story beats
-- Archetypal character traits
-- Formulaic plot structures
+Cliché detection module.
 
 See CONCEPTS.md for definitions of cliché detection requirements.
+The ClicheDetector class provides the main interface for cliché detection.
 """
 
-from typing import Dict, List, Optional, Tuple
-import re
+import logging
+from typing import Dict, List, Optional, Any
 
-from .utils.validation import (
-    detect_cliches,
-    detect_generic_archetypes,
-    CLICHE_PATTERNS,
-    ARCHETYPE_PATTERNS,
-)
-
-# Import private function for generic pattern detection
-# Note: This is a private function, but we need it for comprehensive detection
-from .utils.validation import _detect_generic_patterns
-
-
-# Enhanced replacement suggestions for clichés
-# Format: (cliche_phrase, [replacement_options], context_notes)
-CLICHE_REPLACEMENTS = {
-    "dark and stormy night": [
-        "a night that swallowed sound",
-        "a night without stars or moon",
-        "a night that pressed down",
-    ],
-    "once upon a time": [
-        "it began",
-        "the story starts",
-        "in the beginning",
-    ],
-    "in the nick of time": [
-        "just as the moment shifted",
-        "at the last possible instant",
-        "when all seemed lost",
-    ],
-    "all hell broke loose": [
-        "everything fractured",
-        "chaos erupted",
-        "the situation unraveled",
-    ],
-    "calm before the storm": [
-        "the pause before change",
-        "a deceptive stillness",
-        "the quiet that precedes",
-    ],
-    "needle in a haystack": [
-        "something nearly impossible to find",
-        "a search with no clear path",
-        "finding what shouldn't be found",
-    ],
-    "tip of the iceberg": [
-        "only the surface",
-        "the visible part of something larger",
-        "what showed above the waterline",
-    ],
-    "dead as a doornail": [
-        "completely still",
-        "without life or movement",
-        "utterly motionless",
-    ],
-    "raining cats and dogs": [
-        "rain that pounded",
-        "a deluge that soaked everything",
-        "water falling in sheets",
-    ],
-    "piece of cake": [
-        "effortless",
-        "without difficulty",
-        "easily accomplished",
-    ],
-    "blessing in disguise": [
-        "something that seemed wrong but wasn't",
-        "a gift wrapped in difficulty",
-        "good fortune in unexpected form",
-    ],
-    "beat around the bush": [
-        "avoid the point",
-        "speak without saying",
-        "circle the truth",
-    ],
-    "break the ice": [
-        "create connection",
-        "find common ground",
-        "begin the conversation",
-    ],
-    "hit the nail on the head": [
-        "exactly right",
-        "precisely correct",
-        "the truth of it",
-    ],
-    "let the cat out of the bag": [
-        "reveal the secret",
-        "expose what was hidden",
-        "speak the truth that shouldn't be spoken",
-    ],
-}
-
-# Predictable story beats (formulaic plot structures)
-PREDICTABLE_BEATS = [
-    # Hero's journey patterns
-    ("the call to adventure", ["unexpected invitation", "chance encounter", "sudden opportunity"]),
-    ("refusal of the call", ["initial hesitation", "doubts surface", "resistance to change"]),
-    ("meeting the mentor", ["wise guide appears", "teacher arrives", "elder provides wisdom"]),
-    ("crossing the threshold", ["entering new world", "leaving comfort zone", "taking the leap"]),
-    ("the ordeal", ["greatest challenge", "ultimate test", "final confrontation"]),
-    ("the reward", ["victory achieved", "goal reached", "prize obtained"]),
-    ("the return", ["coming home", "back to beginning", "full circle"]),
-    
-    # Romance patterns
-    ("love at first sight", ["instant connection", "immediate attraction", "spark between them"]),
-    ("misunderstanding drives them apart", ["conflict separates", "miscommunication divides", "wrong assumption creates distance"]),
-    ("grand gesture wins them back", ["dramatic declaration", "profound act of love", "ultimate proof of feeling"]),
-    
-    # Mystery patterns
-    ("red herring", ["false clue", "misleading evidence", "distraction from truth"]),
-    ("the butler did it", ["obvious suspect", "too convenient solution", "predictable reveal"]),
-    ("twist ending", ["unexpected conclusion", "surprise resolution", "revelation changes everything"]),
-    
-    # Horror patterns
-    ("the jump scare", ["sudden appearance", "unexpected moment", "moment of shock"]),
-    ("it was all a dream", ["waking from nightmare", "reality returns", "illusion fades"]),
-    ("the final girl", ["last one standing", "sole survivor", "one who endures"]),
-]
-
-# Formulaic plot structures
-FORMULAIC_PLOTS = [
-    # Three-act structure (too rigid)
-    ("setup, conflict, resolution", ["beginning, middle, end with unexpected turns"]),
-    ("boy meets girl, boy loses girl, boy gets girl", ["connection, separation, reunion with complications"]),
-    
-    # Quest patterns
-    ("find the magical object", ["search for something important", "quest for meaning", "journey toward understanding"]),
-    ("defeat the evil villain", ["overcome the antagonist", "face the opposition", "confront the challenge"]),
-    
-    # Coming of age
-    ("innocent youth learns harsh truth", ["naive character gains wisdom", "sheltered person faces reality", "protected individual discovers complexity"]),
-]
+logger = logging.getLogger(__name__)
 
 
 class ClicheDetector:
@@ -160,339 +24,212 @@ class ClicheDetector:
     
     def __init__(self):
         """Initialize the cliché detector."""
-        self.cliche_replacements = CLICHE_REPLACEMENTS
-        self.predictable_beats = PREDICTABLE_BEATS
-        self.formulaic_plots = FORMULAIC_PLOTS
+        # Common phrase clichés
+        self.phrase_cliches = [
+            "it was a dark and stormy night",
+            "once upon a time",
+            "little did they know",
+            "in that moment",
+            "her heart pounded",
+            "his eyes widened",
+            "time seemed to stand still",
+            "it was then that",
+            "without warning",
+            "out of nowhere"
+        ]
+        
+        # Predictable story beats
+        self.story_beats_patterns = [
+            {"beat": "call to adventure", "alternatives": ["unexpected summons", "reluctant discovery"]},
+            {"beat": "hero's journey", "alternatives": ["subverted expectations", "non-linear progression"]},
+        ]
+        
+        # Plot structure patterns
+        self.plot_structures_patterns = [
+            {"structure": ["setup", "conflict", "resolution"], "alternatives": ["complex narrative", "multi-threaded"]},
+        ]
     
     def detect_all_cliches(
         self,
-        text: str,
+        text: Optional[str] = None,
         character: Optional[Dict] = None,
         outline: Optional[Dict] = None
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """
-        Comprehensive cliché detection across all categories.
+        Comprehensive cliché detection across text, character, and outline.
         
         Args:
             text: Story text to analyze
-            character: Character description (optional)
-            outline: Story outline (optional, for beat detection)
-        
+            character: Character description dict
+            outline: Story outline dict
+            
         Returns:
-            Dict with comprehensive detection results:
+            Dict with detection results:
             {
-                "phrase_cliches": dict,  # From detect_cliches()
-                "archetype_cliches": dict,  # From detect_generic_archetypes()
-                "generic_patterns": list,  # From _detect_generic_patterns()
-                "predictable_beats": list,  # Detected story beats
-                "formulaic_plots": list,  # Detected plot structures
-                "total_issues": int,
-                "suggestions": list[str]
+                "phrase_cliches": List[Dict],
+                "character_archetypes": List[Dict],
+                "predictable_beats": List[Dict],
+                "plot_structures": List[Dict],
+                "has_cliches": bool,
+                "total_cliches": int
             }
         """
         results = {
-            "phrase_cliches": {},
-            "archetype_cliches": {},
-            "generic_patterns": [],
+            "phrase_cliches": [],
+            "character_archetypes": [],
             "predictable_beats": [],
-            "formulaic_plots": [],
-            "total_issues": 0,
-            "suggestions": [],
+            "plot_structures": [],
+            "has_cliches": False,
+            "total_cliches": 0
         }
         
-        # Detect phrase clichés
-        if text:
-            results["phrase_cliches"] = detect_cliches(text)
-            results["generic_patterns"] = _detect_generic_patterns(text, text.lower())
+        # Detect phrase clichés in text
+        if text and isinstance(text, str):
+            text_lower = text.lower()
+            for cliche in self.phrase_cliches:
+                if cliche in text_lower:
+                    results["phrase_cliches"].append({
+                        "phrase": cliche,
+                        "suggestion": f"Replace '{cliche}' with something more original"
+                    })
         
-        # Detect archetype clichés
+        # Detect character archetypes
         if character:
-            results["archetype_cliches"] = detect_generic_archetypes(character)
+            char_desc = character.get("description", "") if isinstance(character, dict) else str(character)
+            char_desc_lower = char_desc.lower()
+            
+            archetypes = ["chosen one", "destined hero", "reluctant hero", "wise old mentor"]
+            for archetype in archetypes:
+                if archetype in char_desc_lower:
+                    results["character_archetypes"].append({
+                        "archetype": archetype,
+                        "suggestion": f"Add unique traits to move beyond '{archetype}' archetype"
+                    })
         
-        # Detect predictable story beats
-        if text:
-            results["predictable_beats"] = self._detect_predictable_beats(text)
-        
-        # Detect formulaic plot structures
+        # Detect predictable beats in outline
         if outline:
-            results["formulaic_plots"] = self._detect_formulaic_plots(outline)
-        elif text:
-            # Try to infer from text if outline not provided
-            results["formulaic_plots"] = self._detect_formulaic_plots_from_text(text)
+            outline_text = str(outline)
+            beat_check = self._detect_predictable_beats(outline_text)
+            if beat_check:
+                results["predictable_beats"].extend(beat_check)
         
-        # Calculate total issues
-        results["total_issues"] = (
-            results["phrase_cliches"].get("cliche_count", 0) +
-            len(results["archetype_cliches"].get("generic_elements", [])) +
-            len(results["generic_patterns"]) +
+        # Calculate totals
+        results["total_cliches"] = (
+            len(results["phrase_cliches"]) +
+            len(results["character_archetypes"]) +
             len(results["predictable_beats"]) +
-            len(results["formulaic_plots"])
+            len(results["plot_structures"])
         )
-        
-        # Generate suggestions
-        results["suggestions"] = self._generate_replacement_suggestions(results)
+        results["has_cliches"] = results["total_cliches"] > 0
         
         return results
     
-    def _detect_predictable_beats(self, text: str) -> List[Dict]:
+    def _detect_predictable_beats(self, outline_text: str) -> List[Dict]:
         """
-        Detect predictable story beats in text.
+        Detect predictable story beats in outline text.
         
         Args:
-            text: Story text to analyze
-        
-        Returns:
-            List of detected beats with context
-        """
-        detected = []
-        text_lower = text.lower()
-        
-        for beat_phrase, alternatives in self.predictable_beats:
-            # Check for beat phrase with word boundaries
-            pattern = r'\b' + re.escape(beat_phrase) + r'\b'
-            matches = list(re.finditer(pattern, text_lower))
+            outline_text: Text representation of outline
             
-            for match in matches:
-                start, end = match.span()
-                context_start = max(0, start - 50)
-                context_end = min(len(text), end + 50)
-                context = text[context_start:context_end]
-                
-                detected.append({
-                    "beat": beat_phrase,
-                    "position": start,
-                    "context": context,
-                    "alternatives": alternatives,
-                })
-        
-        return detected
-    
-    def _detect_formulaic_plots(self, outline: Dict) -> List[Dict]:
-        """
-        Detect formulaic plot structures in outline.
-        
-        Args:
-            outline: Story outline structure
-        
         Returns:
-            List of detected formulaic patterns
+            List of detected beat patterns
         """
+        outline_lower = outline_text.lower()
         detected = []
         
-        # Check outline structure
-        acts = outline.get("acts", {})
-        structure = outline.get("structure", [])
-        
-        # Convert to string for pattern matching
-        structure_str = " ".join([str(v) for v in acts.values()] + structure).lower()
-        
-        for plot_pattern, alternatives in self.formulaic_plots:
-            if plot_pattern.lower() in structure_str:
+        for pattern in self.story_beats_patterns:
+            beat = pattern["beat"]
+            if beat in outline_lower:
                 detected.append({
-                    "pattern": plot_pattern,
-                    "alternatives": alternatives,
-                    "location": "outline_structure",
+                    "beat": beat,
+                    "alternatives": pattern["alternatives"],
+                    "suggestion": f"Consider alternatives to '{beat}': {', '.join(pattern['alternatives'])}"
                 })
         
         return detected
     
-    def _detect_formulaic_plots_from_text(self, text: str) -> List[Dict]:
+    def suggest_replacements(self, cliche: Optional[str] = None) -> List[str]:
         """
-        Attempt to detect formulaic plots from text (less reliable than outline).
+        Suggest replacements for a detected cliché.
         
         Args:
-            text: Story text to analyze
-        
-        Returns:
-            List of detected formulaic patterns
-        """
-        detected = []
-        text_lower = text.lower()
-        
-        # Look for key phrases that suggest formulaic plots
-        for plot_pattern, alternatives in self.formulaic_plots:
-            # Check if pattern appears in text
-            if plot_pattern.lower() in text_lower:
-                detected.append({
-                    "pattern": plot_pattern,
-                    "alternatives": alternatives,
-                    "location": "text_content",
-                    "confidence": "low",  # Less reliable from text alone
-                })
-        
-        return detected
-    
-    def _generate_replacement_suggestions(self, results: Dict) -> List[str]:
-        """
-        Generate actionable replacement suggestions from detection results.
-        
-        Args:
-            results: Detection results from detect_all_cliches()
-        
-        Returns:
-            List of suggestion strings
-        """
-        suggestions = []
-        
-        # Phrase cliché suggestions
-        phrase_cliches = results.get("phrase_cliches", {})
-        if phrase_cliches.get("has_cliches"):
-            found = phrase_cliches.get("found_cliches", [])
-            count = phrase_cliches.get("cliche_count", 0)
-            suggestions.append(
-                f"Found {count} clichéd phrase(s): {', '.join(found[:3])}. "
-                "Consider replacing with more specific, vivid language."
-            )
-        
-        # Archetype suggestions
-        archetype_cliches = results.get("archetype_cliches", {})
-        if archetype_cliches.get("has_generic_archetype"):
-            elements = archetype_cliches.get("generic_elements", [])
-            suggestions.append(
-                f"Character shows generic archetype traits: {', '.join(elements)}. "
-                "Add unique quirks, contradictions, or specific details to make them distinctive."
-            )
-        
-        # Generic pattern suggestions
-        generic_patterns = results.get("generic_patterns", [])
-        if generic_patterns:
-            pattern_types = {}
-            for pattern in generic_patterns:
-                ptype = pattern.get("type", "unknown")
-                pattern_types[ptype] = pattern_types.get(ptype, 0) + 1
+            cliche: The cliché phrase to get replacements for
             
-            for ptype, count in pattern_types.items():
-                suggestions.append(
-                    f"Found {count} instance(s) of {ptype.replace('_', ' ')}. "
-                    "Replace with more specific language."
-                )
-        
-        # Predictable beat suggestions
-        predictable_beats = results.get("predictable_beats", [])
-        if predictable_beats:
-            unique_beats = set(b["beat"] for b in predictable_beats)
-            suggestions.append(
-                f"Found {len(predictable_beats)} predictable story beat(s): {', '.join(list(unique_beats)[:3])}. "
-                "Consider subverting expectations or adding unexpected complications."
-            )
-        
-        # Formulaic plot suggestions
-        formulaic_plots = results.get("formulaic_plots", [])
-        if formulaic_plots:
-            patterns = [p["pattern"] for p in formulaic_plots]
-            suggestions.append(
-                f"Story follows formulaic plot structure: {', '.join(patterns[:2])}. "
-                "Consider adding unexpected turns or subverting the expected pattern."
-            )
-        
-        return suggestions
-    
-    def suggest_replacements(self, cliche_phrase: str, context: Optional[str] = None) -> List[str]:
-        """
-        Get replacement suggestions for a specific cliché phrase.
-        
-        Args:
-            cliche_phrase: The cliché phrase to replace
-            context: Optional context to help choose better replacement
-        
         Returns:
-            List of replacement suggestions (best first)
+            List of suggested replacement phrases
         """
-        # Normalize phrase
-        phrase_lower = cliche_phrase.lower()
+        if not cliche:
+            return [
+                "Use specific, concrete language",
+                "Focus on unique character details",
+                "Avoid stock phrases and predictable patterns"
+            ]
         
-        # Check exact match
-        if phrase_lower in self.cliche_replacements:
-            return self.cliche_replacements[phrase_lower]
+        cliche_lower = cliche.lower()
         
-        # Check if it's a variation of a known cliché
-        for known_cliche, replacements in self.cliche_replacements.items():
-            if known_cliche in phrase_lower or phrase_lower in known_cliche:
-                return replacements
+        # Check phrase clichés
+        for phrase in self.phrase_cliches:
+            if phrase in cliche_lower:
+                return [
+                    f"Replace '{phrase}' with a more specific description",
+                    "Use concrete sensory details instead",
+                    "Focus on what makes this moment unique"
+                ]
         
-        # Check CLICHE_PATTERNS for variations
-        for base_phrase, variations, _ in CLICHE_PATTERNS:
-            if base_phrase in phrase_lower:
-                # Return replacements if available, otherwise generate generic suggestion
-                if base_phrase in self.cliche_replacements:
-                    return self.cliche_replacements[base_phrase]
-                return [f"Replace '{cliche_phrase}' with more specific language"]
+        # Check story beats
+        for pattern in self.story_beats_patterns:
+            if pattern["beat"] in cliche_lower:
+                return pattern["alternatives"]
         
-        # No specific replacement found
-        return [f"Replace '{cliche_phrase}' with more specific, vivid language"]
+        # Generic suggestions
+        return [
+            "Use more specific language",
+            "Focus on unique details",
+            "Avoid generic phrasing"
+        ]
     
     def apply_replacements(
         self,
         text: str,
-        replacements: Optional[Dict[str, str]] = None,
-        auto_replace: bool = False
-    ) -> Tuple[str, List[Dict]]:
+        replacements: Dict[str, str]
+    ) -> str:
         """
-        Apply cliché replacements to text.
+        Apply replacement suggestions to text.
         
         Args:
-            text: Text to revise
-            replacements: Optional dict of {cliche: replacement} to use
-            auto_replace: If True, automatically use best suggestions
-        
+            text: Original text
+            replacements: Dict mapping clichés to replacements
+            
         Returns:
-            Tuple of (revised_text, applied_replacements)
-            applied_replacements is list of {original, replacement, position}
+            Text with replacements applied
         """
-        if not text:
-            return text, []
+        if not isinstance(text, str):
+            raise TypeError(f"text must be a string, got {type(text).__name__}")
         
-        revised_text = text
-        applied = []
+        if not isinstance(replacements, dict):
+            raise TypeError(f"replacements must be a dict, got {type(replacements).__name__}")
         
-        # Detect clichés
-        cliche_results = detect_cliches(text)
-        found_cliches = cliche_results.get("found_cliches", [])
+        result = text
+        for cliche, replacement in replacements.items():
+            if not isinstance(replacement, str):
+                raise TypeError(f"Replacement for '{cliche}' must be a string, got {type(replacement).__name__}")
+            result = result.replace(cliche, replacement)
         
-        if not found_cliches:
-            return text, []
-        
-        # Build replacement map
-        replacement_map = replacements or {}
-        
-        if auto_replace and not replacement_map:
-            # Auto-generate replacements
-            for cliche in found_cliches:
-                suggestions = self.suggest_replacements(cliche)
-                if suggestions:
-                    replacement_map[cliche] = suggestions[0]  # Use first (best) suggestion
-        
-        # Apply replacements (longest first to avoid partial matches)
-        sorted_cliches = sorted(replacement_map.keys(), key=len, reverse=True)
-        
-        for cliche in sorted_cliches:
-            if cliche in replacement_map:
-                replacement = replacement_map[cliche]
-                # Use word boundaries for safe replacement
-                pattern = re.compile(r'\b' + re.escape(cliche) + r'\b', re.IGNORECASE)
-                
-                def replacer(match):
-                    applied.append({
-                        "original": match.group(0),
-                        "replacement": replacement,
-                        "position": match.start(),
-                    })
-                    return replacement
-                
-                revised_text = pattern.sub(replacer, revised_text)
-        
-        return revised_text, applied
+        return result
+
+
+# Singleton instance
+_cliche_detector_instance: Optional[ClicheDetector] = None
 
 
 def get_cliche_detector() -> ClicheDetector:
     """
-    Get or create a singleton cliché detector instance.
+    Get the singleton ClicheDetector instance.
     
     Returns:
         ClicheDetector instance
     """
-    global _detector_instance
-    if '_detector_instance' not in globals():
-        _detector_instance = ClicheDetector()
-    return _detector_instance
-
+    global _cliche_detector_instance
+    if _cliche_detector_instance is None:
+        _cliche_detector_instance = ClicheDetector()
+    return _cliche_detector_instance

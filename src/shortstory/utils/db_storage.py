@@ -9,12 +9,18 @@ import json
 import sqlite3
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, Iterator
 from datetime import datetime
 from contextlib import contextmanager
 import logging
 
-logger = logging.getLogger(__name__)
+from .errors import (
+    StorageError,
+    DataIntegrityError,
+    DatabaseConnectionError,
+)
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 # Get the project root
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -28,60 +34,105 @@ def ensure_db_dir() -> Path:
     return DB_DIR
 
 
+class ConnectionManager:
+    """
+    Manages database connections and transactions.
+    
+    Encapsulates database connection logic to improve testability
+    and reduce coupling between StoryStorage and raw SQLite functions.
+    """
+    
+    def __init__(self, db_path: Optional[Path] = None):
+        """
+        Initialize connection manager.
+        
+        Args:
+            db_path: Path to database file (defaults to DB_PATH)
+        """
+        self.db_path = db_path or DB_PATH
+        ensure_db_dir()
+    
+    def get_connection(self) -> sqlite3.Connection:
+        """Get a database connection."""
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row  # Enable column access by name
+        return conn
+    
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Context manager for database transactions."""
+        conn = self.get_connection()
+        try:
+            yield conn
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+
+# Global connection manager for backward compatibility
+_default_connection_manager = ConnectionManager()
+
+
 def get_db_connection() -> sqlite3.Connection:
-    """Get a database connection."""
-    ensure_db_dir()
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row  # Enable column access by name
-    return conn
+    """Get a database connection (backward compatibility wrapper)."""
+    return _default_connection_manager.get_connection()
 
 
 @contextmanager
-def db_transaction():
-    """Context manager for database transactions."""
-    conn = get_db_connection()
-    try:
+def db_transaction() -> Iterator[sqlite3.Connection]:
+    """Context manager for database transactions (backward compatibility wrapper)."""
+    with _default_connection_manager.transaction() as conn:
         yield conn
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
 
 
-def init_database():
-    """Initialize the database schema."""
-    with db_transaction() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS stories (
-                id TEXT PRIMARY KEY,
-                genre TEXT,
-                premise TEXT,
-                outline TEXT,
-                scaffold TEXT,
-                text TEXT,
-                word_count INTEGER,
-                max_words INTEGER DEFAULT 7500,
-                draft TEXT,
-                revised_draft TEXT,
-                revision_history TEXT,
-                current_revision INTEGER DEFAULT 1,
-                genre_config TEXT,
-                created_at TEXT,
-                updated_at TEXT,
-                saved_at TEXT
-            )
-        """)
-        # Create index for faster queries
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_stories_updated_at 
-            ON stories(updated_at DESC)
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_stories_genre 
-            ON stories(genre)
-        """)
+# Database schema definition
+# This centralizes the schema definition to make it easier to maintain and version.
+# For schema changes, update this constant and consider implementing migrations.
+DB_SCHEMA = """
+CREATE TABLE IF NOT EXISTS stories (
+    id TEXT PRIMARY KEY,
+    genre TEXT,
+    premise TEXT,
+    outline TEXT,
+    scaffold TEXT,
+    text TEXT,
+    word_count INTEGER,
+    max_words INTEGER DEFAULT 7500,
+    draft TEXT,
+    revised_draft TEXT,
+    revision_history TEXT,
+    current_revision INTEGER DEFAULT 1,
+    genre_config TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    saved_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stories_updated_at 
+ON stories(updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_stories_genre 
+ON stories(genre);
+"""
+
+
+def init_database(connection_manager: Optional[ConnectionManager] = None) -> None:
+    """
+    Initialize the database schema.
+    
+    Uses the centralized DB_SCHEMA constant to create tables and indexes.
+    This makes schema changes easier to manage and version.
+    
+    Args:
+        connection_manager: Optional ConnectionManager instance.
+                           If not provided, uses default connection manager.
+    """
+    conn_mgr = connection_manager or _default_connection_manager
+    with conn_mgr.transaction() as conn:
+        conn.executescript(DB_SCHEMA)
 
 
 class StoryStorage:
@@ -92,17 +143,25 @@ class StoryStorage:
     for persistence and optional Redis for caching frequently accessed stories.
     """
     
-    def __init__(self, use_cache: bool = False, cache_ttl: int = 3600):
+    def __init__(
+        self,
+        use_cache: bool = False,
+        cache_ttl: int = 3600,
+        connection_manager: Optional[ConnectionManager] = None
+    ):
         """
         Initialize story storage.
         
         Args:
             use_cache: Whether to use Redis caching (default: False)
             cache_ttl: Cache time-to-live in seconds (default: 3600)
+            connection_manager: Optional ConnectionManager instance for database access.
+                               If not provided, uses default connection manager.
         """
         self.use_cache = use_cache
         self.cache_ttl = cache_ttl
         self._cache = None
+        self._conn_manager = connection_manager or _default_connection_manager
         
         if use_cache:
             try:
@@ -117,7 +176,7 @@ class StoryStorage:
                 logger.warning(f"Failed to connect to Redis: {e}, caching disabled")
                 self.use_cache = False
         
-        # Initialize database
+        # Initialize database (should ideally be called at application startup)
         init_database()
     
     def _get_cache_key(self, story_id: str) -> str:
@@ -127,24 +186,103 @@ class StoryStorage:
     def _serialize_story(self, story: Dict[str, Any]) -> Dict[str, Any]:
         """Serialize story data for database storage."""
         serialized = story.copy()
+        
+        # Convert Pydantic models to dicts first (recursively)
+        from src.shortstory.models import PremiseModel, OutlineModel, CharacterModel, StoryMetadata
+        # Check if StoryMetadata is a Pydantic model by checking for BaseModel
+        from pydantic import BaseModel
+        pydantic_models = (PremiseModel, OutlineModel, CharacterModel, StoryMetadata, BaseModel)
+        
+        def convert_pydantic_models(obj):
+            """Recursively convert Pydantic models to dicts."""
+            if isinstance(obj, pydantic_models):
+                # Convert Pydantic model to dict
+                if hasattr(obj, 'model_dump'):
+                    return obj.model_dump(exclude_none=True)
+                else:
+                    return obj.dict(exclude_none=True)
+            elif isinstance(obj, dict):
+                # Recursively process dict values
+                return {k: convert_pydantic_models(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                # Recursively process list items
+                return [convert_pydantic_models(item) for item in obj]
+            else:
+                return obj
+        
+        # Convert all Pydantic models in the story dict
+        for key, value in serialized.items():
+            serialized[key] = convert_pydantic_models(value)
+        
         # Convert complex objects to JSON strings
-        for key in ['premise', 'outline', 'scaffold', 'draft', 'revised_draft', 
-                   'revision_history', 'genre_config']:
-            if key in serialized and isinstance(serialized[key], (dict, list)):
-                serialized[key] = json.dumps(serialized[key])
+        # Fields that are always serialized (frequently accessed)
+        json_fields = ['premise', 'outline', 'scaffold', 'draft', 'revised_draft', 
+                      'revision_history', 'genre_config']
+        for key in json_fields:
+            if key in serialized:
+                value = serialized[key]
+                # Skip if already a string (already serialized)
+                if isinstance(value, str):
+                    continue
+                # Convert dict/list to JSON string
+                if isinstance(value, (dict, list)):
+                    try:
+                        serialized[key] = json.dumps(value)
+                    except TypeError as e:
+                        # If still can't serialize, log and try to convert again
+                        logger.error(f"Failed to serialize {key}: {e}, type: {type(value)}")
+                        # Try one more conversion pass
+                        converted = convert_pydantic_models(value)
+                        if isinstance(converted, (dict, list)):
+                            serialized[key] = json.dumps(converted)
+                        else:
+                            raise
         return serialized
     
-    def _deserialize_story(self, row: sqlite3.Row) -> Dict[str, Any]:
-        """Deserialize story data from database."""
+    def _deserialize_story(self, row: sqlite3.Row, lazy_fields: bool = False) -> Dict[str, Any]:
+        """
+        Deserialize story data from database.
+        
+        Args:
+            row: Database row to deserialize
+            lazy_fields: If True, skip deserialization of large fields (draft, revised_draft, 
+                        revision_history) for performance. These can be deserialized on-demand.
+        
+        Returns:
+            Deserialized story dictionary
+        """
         story = dict(row)
-        # Convert JSON strings back to objects
-        for key in ['premise', 'outline', 'scaffold', 'draft', 'revised_draft',
-                   'revision_history', 'genre_config']:
+        
+        # Fields that are always deserialized (frequently accessed, typically small)
+        always_deserialize = ['premise', 'outline', 'scaffold', 'genre_config']
+        
+        # Fields that can be lazily deserialized (potentially large, not always needed)
+        lazy_deserialize = ['draft', 'revised_draft', 'revision_history']
+        
+        # Always deserialize frequently accessed fields
+        for key in always_deserialize:
             if story.get(key) and isinstance(story[key], str):
                 try:
                     story[key] = json.loads(story[key])
-                except (json.JSONDecodeError, TypeError):
-                    pass  # Keep as string if not valid JSON
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Failed to deserialize '{key}' for story {story.get('id')}: {e}. "
+                        "Keeping as string."
+                    )
+        
+        # Conditionally deserialize large fields
+        if not lazy_fields:
+            for key in lazy_deserialize:
+                if story.get(key) and isinstance(story[key], str):
+                    try:
+                        story[key] = json.loads(story[key])
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Failed to deserialize '{key}' for story {story.get('id')}: {e}. "
+                            "Keeping as string."
+                        )
+        # If lazy_fields=True, these remain as JSON strings and can be deserialized on-demand
+        
         return story
     
     def save_story(self, story: Dict[str, Any]) -> bool:
@@ -155,12 +293,20 @@ class StoryStorage:
             story: Story dictionary to save
             
         Returns:
-            True if successful, False otherwise
+            True if successful
+            
+        Raises:
+            ValueError: If story ID is missing
+            DataIntegrityError: If data integrity constraints are violated
+            DatabaseConnectionError: If database operational error occurs
+            StorageError: For other unexpected storage errors
         """
+        story_id = story.get("id")
+        if not story_id:
+            logger.error("Attempted to save story without an ID.")
+            raise ValueError("Story ID is required to save a story.")
+        
         try:
-            story_id = story.get("id")
-            if not story_id:
-                return False
             
             now = datetime.now().isoformat()
             serialized = self._serialize_story(story)
@@ -171,7 +317,7 @@ class StoryStorage:
             serialized['updated_at'] = now
             serialized['saved_at'] = now
             
-            with db_transaction() as conn:
+            with self._conn_manager.transaction() as conn:
                 # Check if story exists
                 cursor = conn.execute("SELECT id FROM stories WHERE id = ?", (story_id,))
                 exists = cursor.fetchone() is not None
@@ -243,9 +389,30 @@ class StoryStorage:
                     logger.warning(f"Failed to update cache for story {story_id}: {e}")
             
             return True
+        except sqlite3.IntegrityError as e:
+            logger.error(f"Data integrity error saving story {story_id}: {e}", exc_info=True)
+            raise DataIntegrityError(
+                f"Failed to save story due to data integrity issue: {e}",
+                details={"story_id": story_id}
+            ) from e
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database operational error saving story {story_id}: {e}", exc_info=True)
+            raise DatabaseConnectionError(
+                f"Failed to save story due to database error: {e}",
+                details={"story_id": story_id}
+            ) from e
+        except (ValueError, TypeError) as e:  # ValueError for JSON decode errors
+            logger.error(f"Serialization error saving story {story_id}: {e}", exc_info=True)
+            raise StorageError(
+                f"Failed to save story due to serialization error: {e}",
+                details={"story_id": story_id}
+            ) from e
         except Exception as e:
-            logger.error(f"Error saving story {story_id}: {e}", exc_info=True)
-            return False
+            logger.critical(f"Unexpected error saving story {story_id}: {e}", exc_info=True)
+            raise StorageError(
+                f"An unexpected storage error occurred: {e}",
+                details={"story_id": story_id}
+            ) from e
     
     def load_story(self, story_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -256,19 +423,23 @@ class StoryStorage:
             
         Returns:
             Story dictionary or None if not found
+            
+        Raises:
+            DatabaseConnectionError: If database operational error occurs
+            StorageError: For other unexpected storage errors
         """
         # Check cache first
         if self.use_cache and self._cache:
             try:
                 cached = self._cache.get(self._get_cache_key(story_id))
-                if cached:
+                if cached and isinstance(cached, str):
                     return json.loads(cached)
             except Exception as e:
                 logger.warning(f"Cache lookup failed for story {story_id}: {e}")
         
         # Load from database
         try:
-            with db_transaction() as conn:
+            with self._conn_manager.transaction() as conn:
                 cursor = conn.execute("SELECT * FROM stories WHERE id = ?", (story_id,))
                 row = cursor.fetchone()
                 
@@ -287,8 +458,24 @@ class StoryStorage:
                             logger.warning(f"Failed to cache story {story_id}: {e}")
                     
                     return story
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database operational error loading story {story_id}: {e}", exc_info=True)
+            raise DatabaseConnectionError(
+                f"Failed to load story due to database error: {e}",
+                details={"story_id": story_id}
+            ) from e
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Deserialization error loading story {story_id}: {e}", exc_info=True)
+            raise StorageError(
+                f"Failed to load story due to deserialization error: {e}",
+                details={"story_id": story_id}
+            ) from e
         except Exception as e:
-            logger.error(f"Error loading story {story_id}: {e}", exc_info=True)
+            logger.critical(f"Unexpected error loading story {story_id}: {e}", exc_info=True)
+            raise StorageError(
+                f"An unexpected storage error occurred: {e}",
+                details={"story_id": story_id}
+            ) from e
         
         return None
     
@@ -301,21 +488,24 @@ class StoryStorage:
             updates: Dictionary of fields to update
             
         Returns:
-            True if successful, False otherwise
+            True if successful
+            
+        Raises:
+            NotFoundError: If story is not found
+            DataIntegrityError: If data integrity constraints are violated
+            DatabaseConnectionError: If database operational error occurs
+            StorageError: For other unexpected storage errors
         """
-        try:
-            story = self.load_story(story_id)
-            if not story:
-                return False
-            
-            # Merge updates
-            story.update(updates)
-            story['updated_at'] = datetime.now().isoformat()
-            
-            return self.save_story(story)
-        except Exception as e:
-            logger.error(f"Error updating story {story_id}: {e}", exc_info=True)
-            return False
+        story = self.load_story(story_id)
+        if not story:
+            from .errors import NotFoundError
+            raise NotFoundError("Story", story_id)
+        
+        # Merge updates
+        story.update(updates)
+        story['updated_at'] = datetime.now().isoformat()
+        
+        return self.save_story(story)
     
     def delete_story(self, story_id: str) -> bool:
         """
@@ -328,7 +518,7 @@ class StoryStorage:
             True if successful, False otherwise
         """
         try:
-            with db_transaction() as conn:
+            with self._conn_manager.transaction() as conn:
                 conn.execute("DELETE FROM stories WHERE id = ?", (story_id,))
             
             # Remove from cache
@@ -361,7 +551,7 @@ class StoryStorage:
             page = max(1, page)
             offset = (page - 1) * per_page
             
-            with db_transaction() as conn:
+            with self._conn_manager.transaction() as conn:
                 # Build query
                 query = "SELECT * FROM stories"
                 params = []
@@ -429,7 +619,7 @@ class StoryStorage:
             Total count of stories
         """
         try:
-            with db_transaction() as conn:
+            with self._conn_manager.transaction() as conn:
                 if genre:
                     cursor = conn.execute("SELECT COUNT(*) FROM stories WHERE genre = ?", (genre,))
                 else:

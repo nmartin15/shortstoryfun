@@ -1,0 +1,38 @@
+{
+  "name": "short-story-pipeline",
+  "version": "1.0.0",
+  "description": "Short Story Pipeline - Frontend JavaScript Tests",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^9.3.4",
+    "@testing-library/jest-dom": "^6.1.5",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jest-fetch-mock": "^3.0.3",
+    "jsdom": "^27.4.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/js/setup.js"
+    ],
+    "testMatch": [
+      "**/tests/js/**/*.test.js"
+    ],
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/static/js/$1"
+    },
+    "collectCoverageFrom": [
+      "static/js/**/*.js",
+      "!static/js/**/*.backup.js"
+    ],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/"
+    ]
+  }
+}
