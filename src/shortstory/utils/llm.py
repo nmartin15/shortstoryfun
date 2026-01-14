@@ -118,7 +118,10 @@ def _estimate_tokens(text: str, model_name: str = "default") -> int:
 
 def _is_story_complete_enough(story_text: str, min_words: int, target_words: int) -> bool:
     """
-    Checks if the story is sufficiently long and appears to have a proper ending.
+    Checks if the story is sufficiently long and appears to have a complete thought.
+    
+    Focus is on word count and complete thoughts, not strict punctuation endings.
+    A story can end with a complete thought even without ending punctuation.
     
     Args:
         story_text: Story text to check
@@ -133,17 +136,32 @@ def _is_story_complete_enough(story_text: str, min_words: int, target_words: int
 
     word_count = len(story_text.split())
     stripped = story_text.rstrip()
-    ends_with_punctuation = stripped.endswith(('.', '!', '?', '"', "'"))
-
-    # Primary check: meets minimum word count AND ends with punctuation
-    if word_count >= min_words and ends_with_punctuation:
-        return True
     
-    # Secondary check for very short stories that might be complete but below target
-    # If it's over 80% of min_words and ends properly, we might accept it.
-    if word_count >= min_words * 0.8 and ends_with_punctuation:
-        logger.info(f"Story slightly short but ends properly: {word_count} words (min: {min_words})")
-        return True
+    # CRITICAL: If below minimum word count, it's definitely incomplete
+    if word_count < min_words:
+        logger.debug(
+            f"Story incomplete: {word_count} words < {min_words} minimum"
+        )
+        return False
+
+    # Primary check: If it meets minimum word count, it's complete enough
+    # We care about complete thoughts, not necessarily complete sentences with punctuation
+    if word_count >= min_words:
+        # Check if it ends with a complete thought (any reasonable ending)
+        # Accept endings with punctuation, dialogue, or even without if word count is met
+        ends_with_any_closure = stripped.endswith(('.', '!', '?', '"', "'", ',', ';', ':', '-', '—'))
+        
+        if ends_with_any_closure:
+            logger.debug(f"Story complete: {word_count} words >= {min_words} minimum, ends with closure")
+            return True
+        else:
+            # Even without punctuation, if word count is met, consider it complete
+            # The story might end with a complete thought without ending punctuation
+            logger.info(
+                f"Story meets word count ({word_count} >= {min_words}) without ending punctuation. "
+                f"Accepting as complete thought. Last 30 chars: '{stripped[-30:]}'"
+            )
+            return True
     
     return False
 
@@ -199,20 +217,29 @@ def _continue_story_if_needed(
             logger.error(f"Failed to add conclusion: {e}", exc_info=True)
 
     # Now, proceed with general continuation if still needed
+    # CRITICAL: Keep generating until we reach the minimum word count
     for attempt in range(max_continuation_attempts):
         word_count = len(current_story.split()) if current_story else 0
+        
+        # If we've reached the minimum and it's complete, we're done
         if _is_story_complete_enough(current_story, story_min_words, target_word_count):
             logger.info(f"Story length OK and complete after {attempt} continuations: {word_count} words (min: {story_min_words:,}, target: {target_word_count:,})")
             return current_story
 
-        logger.warning(
-            f"Attempt {attempt + 1}/{max_continuation_attempts}: Story is too short: {word_count} words (min: {story_min_words:,}, target: {target_word_count:,}). "
-            f"Attempting to continue generation..."
-        )
+        # Calculate how many words we still need
+        remaining_words = story_min_words - word_count
+        
+        # If we've somehow exceeded the minimum, check if it's complete
+        if remaining_words <= 0:
+            if _is_story_complete_enough(current_story, story_min_words, target_word_count):
+                return current_story
+            # If it's over minimum but incomplete, try to add conclusion
+            remaining_words = 500  # Add a bit more to ensure completion
 
-        remaining_words = max(story_min_words - word_count, target_word_count - word_count)
-        if remaining_words <= 0:  # Should be caught by _is_story_complete_enough, but a safety check
-            break 
+        logger.warning(
+            f"Attempt {attempt + 1}/{max_continuation_attempts}: Story is too short: {word_count} words (min: {story_min_words:,}). "
+            f"Need {remaining_words:,} more words. Continuing generation..."
+        ) 
 
         # Truncate the story in the prompt to avoid making prompt too long
         story_words_for_prompt = current_story.split()
@@ -220,14 +247,19 @@ def _continue_story_if_needed(
         if len(story_words_for_prompt) > 500:
             logger.info(f"Truncating story in prompt to last 500 words for continuation (attempt {attempt + 1})")
 
-        continuation_prompt = f"""Continue and complete this short story. It's currently only {word_count} words and MUST reach at least {story_min_words:,} words. Focus on adding more narrative, dialogue, and resolution.
+        continuation_prompt = f"""Continue and complete this short story. It's currently only {word_count} words and MUST reach at least {story_min_words:,} words. 
 
-**CRITICAL: You MUST write at least {remaining_words:,} more words. DO NOT STOP until the story is complete and reaches {story_min_words:,} words.**
+**CRITICAL REQUIREMENTS:**
+- You MUST write at least {remaining_words:,} more words
+- DO NOT STOP until the story is complete and reaches {story_min_words:,} words
+- Include substantial dialogue - add conversations between characters
+- Use dialogue to develop characters, advance plot, and create emotional depth
+- The story must feel complete with a proper ending (dialogue or narrative conclusion)
 
 **Current story (last 500 words):**
 {story_for_prompt}
 
-**CONTINUE NOW:**"""
+**CONTINUE NOW - Add more narrative AND dialogue:**"""
 
         try:
             # Allocate tokens aggressively, but within overall estimated_max_tokens
@@ -244,7 +276,7 @@ def _continue_story_if_needed(
             
             continuation = client.generate(
                 prompt=continuation_prompt,
-                system_prompt=f"You are completing a short story. The story is currently {word_count} words. Continue writing until the story is FULLY COMPLETE and reaches at least {story_min_words:,} words. Focus on developing plot, character, and resolution.",
+                system_prompt=f"You are completing a short story. The story is currently {word_count} words. Continue writing until the story is FULLY COMPLETE and reaches at least {story_min_words:,} words. Include substantial dialogue between characters - use conversations to develop plot, reveal character, and create emotional depth. The story must end with a complete scene, preferably ending with dialogue or a narrative conclusion.",
                 temperature=0.8,
                 max_tokens=allocated_tokens,
             )
@@ -493,9 +525,21 @@ def generate_story_draft(
     
     # Calculate max_tokens from target_words (convert words to tokens)
     # target_words is a word count, but we need tokens for the LLM API
+    # CRITICAL: Use the FULL token budget (8192) for initial generation to maximize output
     estimated_max_tokens = int(target_words * TOKENS_PER_WORD_ESTIMATE * TOKEN_BUFFER_MULTIPLIER) + TOKEN_BUFFER_ADDITION
+    # Always use maximum available tokens for initial generation to avoid premature truncation
     estimated_max_tokens = min(estimated_max_tokens, GEMINI_MAX_OUTPUT_TOKENS)
+    # Ensure we use at least MIN_TOKENS_FOR_FULL_STORY, but prefer maximum if we can
     estimated_max_tokens = max(estimated_max_tokens, MIN_TOKENS_FOR_FULL_STORY)
+    
+    # For initial generation, use the full token budget to maximize story length
+    # This reduces the chance of hitting MAX_TOKENS before reaching minimum word count
+    if estimated_max_tokens < GEMINI_MAX_OUTPUT_TOKENS:
+        logger.info(
+            f"Boosting initial generation tokens from {estimated_max_tokens} to {GEMINI_MAX_OUTPUT_TOKENS} "
+            f"to maximize story length (target: {target_words} words)"
+        )
+        estimated_max_tokens = GEMINI_MAX_OUTPUT_TOKENS
     
     # Generate initial draft
     logger.info(f"Generating story draft: target_words={target_words}, max_words={max_words}, max_tokens={estimated_max_tokens}")
@@ -510,19 +554,54 @@ def generate_story_draft(
     story_text = _strip_metadata_from_story(story_text)
     story_text = _clean_markdown_from_story(story_text)
     
+    # Check initial word count
+    initial_word_count = len(story_text.split()) if story_text else 0
+    logger.info(
+        f"Initial story generation complete: {initial_word_count} words "
+        f"(minimum required: {story_min_words}, target: {target_words})"
+    )
+    
+    # Check if story ends properly (not cut off mid-sentence)
+    # This catches MAX_TOKENS truncation even when word count is met
+    stripped = story_text.rstrip() if story_text else ""
+    ends_properly = stripped.endswith(('.', '!', '?', '"', "'")) if stripped else False
+    
     # Continue story if needed (client is guaranteed to be non-None here)
     target_word_count = int(max_words * TARGET_WORD_COUNT_RATIO)
     if client is None:
         # This should not happen as get_default_client() is called if None
         raise ValueError("LLM client is required for story continuation")
-    story_text = _continue_story_if_needed(
-        story_text=story_text,
-        story_min_words=story_min_words,
-        target_word_count=target_word_count,
-        estimated_max_tokens=estimated_max_tokens,
-        client=client,
-        max_continuation_attempts=3,
-    )
+    
+    # CRITICAL: Continue if:
+    # 1. Under minimum word count (always continue)
+    # 2. Meets word count but doesn't end properly (likely truncated by MAX_TOKENS)
+    # 3. Meets word count but doesn't feel complete
+    should_continue = False
+    continuation_reason = ""
+    
+    if initial_word_count < story_min_words:
+        should_continue = True
+        continuation_reason = f"below minimum ({initial_word_count} < {story_min_words})"
+    elif not ends_properly:
+        should_continue = True
+        continuation_reason = f"ends mid-sentence (likely MAX_TOKENS truncation) - last 50 chars: '{stripped[-50:]}'"
+    elif not _is_story_complete_enough(story_text, story_min_words, target_word_count):
+        should_continue = True
+        continuation_reason = "doesn't feel complete"
+    
+    if should_continue:
+        logger.warning(
+            f"Story {continuation_reason}. FORCING continuation to ensure complete story."
+        )
+        max_attempts = 10 if initial_word_count < story_min_words else 5
+        story_text = _continue_story_if_needed(
+            story_text=story_text,
+            story_min_words=story_min_words,
+            target_word_count=target_word_count,
+            estimated_max_tokens=estimated_max_tokens,
+            client=client,
+            max_continuation_attempts=max_attempts,
+        )
     
     return story_text
 
@@ -569,6 +648,14 @@ def revise_story_text(
     estimated_max_tokens = min(estimated_max_tokens, GEMINI_MAX_OUTPUT_TOKENS)
     estimated_max_tokens = max(estimated_max_tokens, MIN_TOKENS_FOR_FULL_STORY)
     
+    # For revisions, also use full token budget to ensure complete output
+    if estimated_max_tokens < GEMINI_MAX_OUTPUT_TOKENS:
+        logger.info(
+            f"Boosting revision tokens from {estimated_max_tokens} to {GEMINI_MAX_OUTPUT_TOKENS} "
+            f"to maximize story expansion (target: {target_words} words)"
+        )
+        estimated_max_tokens = GEMINI_MAX_OUTPUT_TOKENS
+    
     # Generate revision
     logger.info(f"Revising story: current_words={current_words}, max_words={max_words}, target_words={target_words}, max_tokens={estimated_max_tokens}")
     revised_text = client.generate(
@@ -581,6 +668,34 @@ def revise_story_text(
     # Clean up the revised text
     revised_text = _strip_metadata_from_story(revised_text)
     revised_text = _clean_markdown_from_story(revised_text)
+    
+    # CRITICAL: Check if revision reduced word count or is incomplete
+    revised_word_count = len(revised_text.split()) if revised_text else 0
+    stripped_revised = revised_text.rstrip() if revised_text else ""
+    revised_ends_properly = stripped_revised.endswith(('.', '!', '?', '"', "'")) if stripped_revised else False
+    
+    # If revision reduced word count or doesn't end properly, we need to continue
+    if revised_word_count < current_words:
+        logger.warning(
+            f"Revision REDUCED word count from {current_words} to {revised_word_count}. "
+            f"This should not happen. Original text may have been better."
+        )
+    if not revised_ends_properly:
+        logger.warning(
+            f"Revised story ends mid-sentence (likely MAX_TOKENS truncation). "
+            f"Last 50 chars: '{stripped_revised[-50:]}'"
+        )
+        # Force continuation to complete the revised story
+        from .llm_constants import STORY_MIN_WORDS
+        min_words_for_revision = max(current_words, STORY_MIN_WORDS)
+        revised_text = _continue_story_if_needed(
+            story_text=revised_text,
+            story_min_words=min_words_for_revision,
+            target_word_count=int(max_words * TARGET_WORD_COUNT_RATIO),
+            estimated_max_tokens=estimated_max_tokens,
+            client=client,
+            max_continuation_attempts=5,
+        )
     
     return revised_text
 
