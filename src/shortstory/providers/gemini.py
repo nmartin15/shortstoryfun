@@ -7,6 +7,7 @@ Google's Generative AI models. All Gemini-specific code is isolated here.
 
 import os
 import logging
+import time
 from typing import Optional, List, TYPE_CHECKING
 
 from ..utils.llm import BaseLLMClient
@@ -18,6 +19,14 @@ from ..utils.llm_constants import (
     TOKEN_BUFFER_ADDITION,
     CHARS_PER_TOKEN_ESTIMATE,
 )
+
+# Import monitoring utilities (optional)
+try:
+    from ..utils.monitoring import track_llm_api_call
+    MONITORING_AVAILABLE = True
+except ImportError:
+    MONITORING_AVAILABLE = False
+    track_llm_api_call = None  # type: ignore
 
 if TYPE_CHECKING:
     # Type stubs for google.generativeai when type checking
@@ -232,9 +241,18 @@ class GeminiProvider(BaseLLMClient):
             ]
             
             logger.info(f"Fetched {len(self.available_models)} available Gemini models dynamically")
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError) as e:
             logger.error(
-                f"Failed to fetch available Gemini models dynamically, using fallback list (security risk): {e}",
+                f"Failed to fetch available Gemini models dynamically (network error), using fallback list (security risk): {e}",
+                exc_info=True
+            )
+            # Fallback to predefined list if API call fails
+            # This is a security risk as deprecated/insecure models may still be in the list
+            self.available_models = FALLBACK_ALLOWED_MODELS.copy()
+        except Exception as e:
+            # Catch any other unexpected errors (API errors, etc.)
+            logger.error(
+                f"Failed to fetch available Gemini models dynamically (unexpected error), using fallback list (security risk): {e}",
                 exc_info=True
             )
             # Fallback to predefined list if API call fails
@@ -274,6 +292,11 @@ class GeminiProvider(BaseLLMClient):
         Raises:
             Exception: If generation fails
         """
+        start_time = time.time()
+        input_tokens = None
+        output_tokens = None
+        error_type = None
+        
         try:
             model = self._genai.GenerativeModel(self.model_name)  # type: ignore
             
@@ -290,6 +313,16 @@ class GeminiProvider(BaseLLMClient):
                     model_name=self.model_name
                 )
             
+            # Estimate input tokens for monitoring
+            try:
+                # Try to use model's count_tokens if available
+                input_tokens = model.count_tokens(full_prompt).total_tokens  # type: ignore
+            except (AttributeError, TypeError, ValueError) as e:
+                # Fallback to estimation if count_tokens fails
+                logger.debug(f"Token counting failed, using estimation: {e}")
+                from ..utils.llm import _estimate_tokens
+                input_tokens = _estimate_tokens(full_prompt, self.model_name)
+            
             # Configure generation
             from google.generativeai.types import GenerationConfig  # type: ignore
             generation_config = GenerationConfig(  # type: ignore
@@ -303,16 +336,135 @@ class GeminiProvider(BaseLLMClient):
                 generation_config=generation_config,
             )
             
+            # Extract usage information if available
+            if hasattr(response, 'usage_metadata'):
+                usage = response.usage_metadata
+                if hasattr(usage, 'prompt_token_count'):
+                    input_tokens = usage.prompt_token_count
+                if hasattr(usage, 'candidates_token_count'):
+                    output_tokens = usage.candidates_token_count
+            elif hasattr(response, 'candidates') and response.candidates:
+                # Try to get token count from candidates
+                candidate = response.candidates[0]
+                if hasattr(candidate, 'token_count'):
+                    output_tokens = candidate.token_count
+            
+            # Estimate output tokens if not available
+            if output_tokens is None and response.text:
+                from ..utils.llm import _estimate_tokens
+                output_tokens = _estimate_tokens(response.text, self.model_name)
+            
             # Extract text from response
             if not response.text:
-                finish_reason = getattr(response, 'candidates', [{}])[0].get('finish_reason', 'UNKNOWN')
+                finish_reason = 'UNKNOWN'
+                if hasattr(response, 'candidates') and response.candidates:
+                    finish_reason = getattr(response.candidates[0], 'finish_reason', 'UNKNOWN')
                 logger.warning(f"Gemini generation finished with reason: {finish_reason}. No text returned.")
+                
+                # Track API call with error
+                duration = time.time() - start_time
+                if MONITORING_AVAILABLE and track_llm_api_call:
+                    track_llm_api_call(
+                        provider='gemini',
+                        model=self.model_name.replace('models/', ''),
+                        operation='generate',
+                        duration=duration,
+                        status='error',
+                        input_tokens=input_tokens,
+                        output_tokens=0,
+                        error_type='no_text_returned'
+                    )
                 return ""
             
-            return response.text.strip()
+            # CRITICAL: Check finish_reason even when text is returned
+            # MAX_TOKENS means the output was truncated and we need to continue
+            finish_reason = 'STOP'  # Default assumption
+            if hasattr(response, 'candidates') and response.candidates:
+                finish_reason = getattr(response.candidates[0], 'finish_reason', 'STOP')
             
+            text = response.text.strip()
+            
+            # Log finish_reason for debugging
+            if finish_reason == 'MAX_TOKENS':
+                logger.warning(
+                    f"Gemini generation hit MAX_TOKENS limit ({max_tokens} tokens). "
+                    f"Output may be truncated. Text length: {len(text)} chars, "
+                    f"estimated words: {len(text.split())}"
+                )
+            else:
+                logger.debug(f"Gemini generation finished with reason: {finish_reason}")
+            
+            # Track successful API call
+            duration = time.time() - start_time
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='generate',
+                    duration=duration,
+                    status='success',
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens
+                )
+            
+            return text
+            
+        except (ConnectionError, TimeoutError, OSError) as e:
+            # Network-related errors
+            duration = time.time() - start_time
+            error_type = type(e).__name__
+            logger.error(f"Network error generating content with Gemini: {e}", exc_info=True)
+            
+            # Track API call with error
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='generate',
+                    duration=duration,
+                    status='error',
+                    input_tokens=input_tokens,
+                    output_tokens=None,
+                    error_type=error_type
+                )
+            raise
+        except (ValueError, TypeError, AttributeError) as e:
+            # Configuration or API usage errors
+            duration = time.time() - start_time
+            error_type = type(e).__name__
+            logger.error(f"Configuration error generating content with Gemini: {e}", exc_info=True)
+            
+            # Track API call with error
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='generate',
+                    duration=duration,
+                    status='error',
+                    input_tokens=input_tokens,
+                    output_tokens=None,
+                    error_type=error_type
+                )
+            raise
         except Exception as e:
+            # Catch-all for other API errors (Google API exceptions, etc.)
+            duration = time.time() - start_time
+            error_type = type(e).__name__
             logger.error(f"Error generating content with Gemini: {e}", exc_info=True)
+            
+            # Track API call with error
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='generate',
+                    duration=duration,
+                    status='error',
+                    input_tokens=input_tokens,
+                    output_tokens=None,
+                    error_type=error_type
+                )
             raise
     
     def check_availability(self) -> bool:
@@ -322,6 +474,7 @@ class GeminiProvider(BaseLLMClient):
         Returns:
             True if API is available, False otherwise
         """
+        start_time = time.time()
         try:
             # Check if configured model is in available models list
             base_model = self.model_name.replace("models/", "")
@@ -332,8 +485,53 @@ class GeminiProvider(BaseLLMClient):
                     f"Configured Gemini model '{self.model_name}' not found in available models: {self.available_models}"
                 )
             
+            # Track API call
+            duration = time.time() - start_time
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='check_availability',
+                    duration=duration,
+                    status='success' if is_available else 'error',
+                    error_type=None if is_available else 'model_not_available'
+                )
+            
             return is_available
+        except (AttributeError, KeyError, TypeError) as e:
+            # Configuration or data structure errors
+            duration = time.time() - start_time
+            error_type = type(e).__name__
+            logger.error(f"Configuration error checking Gemini API availability: {e}", exc_info=True)
+            
+            # Track API call with error
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='check_availability',
+                    duration=duration,
+                    status='error',
+                    error_type=error_type
+                )
+            
+            return False
         except Exception as e:
+            # Catch-all for other errors
+            duration = time.time() - start_time
+            error_type = type(e).__name__
             logger.error(f"Error checking Gemini API availability: {e}", exc_info=True)
+            
+            # Track API call with error
+            if MONITORING_AVAILABLE and track_llm_api_call:
+                track_llm_api_call(
+                    provider='gemini',
+                    model=self.model_name.replace('models/', ''),
+                    operation='check_availability',
+                    duration=duration,
+                    status='error',
+                    error_type=error_type
+                )
+            
             return False
 

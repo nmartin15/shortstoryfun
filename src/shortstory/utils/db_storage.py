@@ -65,9 +65,12 @@ class ConnectionManager:
         try:
             yield conn
             conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise DatabaseConnectionError(f"Database transaction failed: {e}", details={"error_type": type(e).__name__})
         except Exception as e:
             conn.rollback()
-            raise e
+            raise
         finally:
             conn.close()
 
@@ -172,8 +175,11 @@ class StoryStorage:
             except ImportError:
                 logger.warning("Redis not available, caching disabled")
                 self.use_cache = False
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.warning(f"Failed to connect to Redis (network error): {e}, caching disabled")
+                self.use_cache = False
             except Exception as e:
-                logger.warning(f"Failed to connect to Redis: {e}, caching disabled")
+                logger.warning(f"Failed to connect to Redis (unexpected error): {e}, caching disabled")
                 self.use_cache = False
         
         # Initialize database (should ideally be called at application startup)
@@ -385,8 +391,10 @@ class StoryStorage:
                         self.cache_ttl,
                         json.dumps(story)
                     )
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    logger.warning(f"Failed to update cache for story {story_id} (network error): {e}")
                 except Exception as e:
-                    logger.warning(f"Failed to update cache for story {story_id}: {e}")
+                    logger.warning(f"Failed to update cache for story {story_id} (unexpected error): {e}")
             
             return True
         except sqlite3.IntegrityError as e:
@@ -434,8 +442,12 @@ class StoryStorage:
                 cached = self._cache.get(self._get_cache_key(story_id))
                 if cached and isinstance(cached, str):
                     return json.loads(cached)
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.warning(f"Cache lookup failed for story {story_id} (network error): {e}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Cache lookup failed for story {story_id} (deserialization error): {e}")
             except Exception as e:
-                logger.warning(f"Cache lookup failed for story {story_id}: {e}")
+                logger.warning(f"Cache lookup failed for story {story_id} (unexpected error): {e}")
         
         # Load from database
         try:
@@ -454,8 +466,10 @@ class StoryStorage:
                                 self.cache_ttl,
                                 json.dumps(story)
                             )
+                        except (ConnectionError, TimeoutError, OSError) as e:
+                            logger.warning(f"Failed to cache story {story_id} (network error): {e}")
                         except Exception as e:
-                            logger.warning(f"Failed to cache story {story_id}: {e}")
+                            logger.warning(f"Failed to cache story {story_id} (unexpected error): {e}")
                     
                     return story
         except sqlite3.OperationalError as e:
@@ -525,10 +539,15 @@ class StoryStorage:
             if self.use_cache and self._cache:
                 try:
                     self._cache.delete(self._get_cache_key(story_id))
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    logger.warning(f"Failed to remove story {story_id} from cache (network error): {e}")
                 except Exception as e:
-                    logger.warning(f"Failed to remove story {story_id} from cache: {e}")
+                    logger.warning(f"Failed to remove story {story_id} from cache (unexpected error): {e}")
             
             return True
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database operational error deleting story {story_id}: {e}", exc_info=True)
+            return False
         except Exception as e:
             logger.error(f"Error deleting story {story_id}: {e}", exc_info=True)
             return False
@@ -602,6 +621,16 @@ class StoryStorage:
                         "has_prev": page > 1
                     }
                 }
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database operational error listing stories: {e}", exc_info=True)
+            return {"stories": [], "pagination": {"page": 1, "per_page": per_page, 
+                                                  "total": 0, "total_pages": 0,
+                                                  "has_next": False, "has_prev": False}}
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Deserialization error listing stories: {e}", exc_info=True)
+            return {"stories": [], "pagination": {"page": 1, "per_page": per_page, 
+                                                  "total": 0, "total_pages": 0,
+                                                  "has_next": False, "has_prev": False}}
         except Exception as e:
             logger.error(f"Error listing stories: {e}", exc_info=True)
             return {"stories": [], "pagination": {"page": 1, "per_page": per_page, 
@@ -625,6 +654,9 @@ class StoryStorage:
                 else:
                     cursor = conn.execute("SELECT COUNT(*) FROM stories")
                 return cursor.fetchone()[0]
+        except sqlite3.OperationalError as e:
+            logger.error(f"Database operational error counting stories: {e}", exc_info=True)
+            return 0
         except Exception as e:
             logger.error(f"Error counting stories: {e}", exc_info=True)
             return 0
