@@ -26,7 +26,6 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     environment:
       name: ${{ github.event.inputs.environment || 'production' }}
-      url: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com
     
     steps:
     - name: Checkout code
