@@ -113,6 +113,7 @@ See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for repository layout.
 
 ### Core Documentation
 - **[CONCEPTS.md](CONCEPTS.md)** - Core principles and terminology (single source of truth)
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Application architecture with service layer (✅ **NEW**)
 - **[pipeline.md](pipeline.md)** - Pipeline architecture and stages
 - **[PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)** - Code organization
 
@@ -125,6 +126,7 @@ See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for repository layout.
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment guide
 - **[PRODUCTION_IMPROVEMENTS.md](PRODUCTION_IMPROVEMENTS.md)** - Production improvements summary
 - **[BACKGROUND_JOBS.md](BACKGROUND_JOBS.md)** - Background job processing with RQ
+- **[CI_CD.md](CI_CD.md)** - CI/CD pipeline documentation (✅ **NEW**)
 
 ### Development & Testing
 - **[TESTING.md](TESTING.md)** - Testing guide
@@ -134,6 +136,7 @@ See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for repository layout.
 - **Security Features** - See Security section below
 
 ### Data Models & Architecture
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Application architecture with service layer (✅ **NEW**)
 - **[STORY_JSON_SCHEMA.md](stories/STORY_JSON_SCHEMA.md)** - Story JSON file structure
 - **[STORY_MODEL_STANDARDIZATION.md](STORY_MODEL_STANDARDIZATION.md)** - Story model standardization approach (✅ **Now using Pydantic models**)
 - **[ARCHITECTURAL_REFACTORING.md](ARCHITECTURAL_REFACTORING.md)** - Architectural refactoring suggestions
